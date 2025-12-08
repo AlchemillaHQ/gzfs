@@ -31,6 +31,7 @@ func main() {
 
 		fmt.Printf("Dataset info for %q\n", datasetName)
 		fmt.Printf("  Name:         %s\n", dataset.Name)
+		fmt.Printf("  GUID:         %s\n", dataset.GUID)
 		fmt.Printf("  Type:         %s\n", dataset.Type)
 		fmt.Printf("  Mountpoint:   %s\n", dataset.Mountpoint)
 		fmt.Printf("  Used:         %d\n", dataset.Used)

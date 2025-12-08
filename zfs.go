@@ -25,6 +25,7 @@ type Dataset struct {
 	z *zfs `json:"-"`
 
 	Name      string      `json:"name"`
+	GUID      string      `json:"guid"`
 	Type      DatasetType `json:"type"`
 	Pool      string      `json:"pool"`
 	CreateTXG string      `json:"createtxg"`
@@ -92,6 +93,7 @@ func (z *zfs) List(ctx context.Context, recursive bool, name ...string) ([]*Data
 	for _, d := range resp.Datasets {
 		d.z = z
 
+		d.GUID = ParseString(d.Properties["guid"].Value)
 		d.Mountpoint = ParseString(d.Properties["mountpoint"].Value)
 		d.Used = ParseSize(d.Properties["used"].Value)
 		d.Available = ParseSize(d.Properties["available"].Value)
@@ -119,6 +121,7 @@ func (z *zfs) Get(ctx context.Context, name string, recursive bool) (*Dataset, e
 	}
 
 	dataset.z = z
+	dataset.GUID = ParseString(dataset.Properties["guid"].Value)
 	dataset.Mountpoint = ParseString(dataset.Properties["mountpoint"].Value)
 	dataset.Used = ParseSize(dataset.Properties["used"].Value)
 	dataset.Available = ParseSize(dataset.Properties["available"].Value)
@@ -628,4 +631,36 @@ func (d *Dataset) Clone(ctx context.Context, dest string, properties map[string]
 	}
 
 	return d.z.Clone(ctx, d.Name, dest, properties)
+}
+
+func (d *Dataset) Rename(ctx context.Context, newName string) (*Dataset, error) {
+	if d == nil {
+		return nil, fmt.Errorf("dataset is nil")
+	}
+
+	if d.z == nil {
+		return nil, fmt.Errorf("no zfs client attached")
+	}
+
+	if newName == "" {
+		return nil, fmt.Errorf("new name cannot be empty")
+	}
+
+	args := []string{"rename", d.Name, newName}
+
+	_, _, err := d.z.cmd.RunBytes(ctx, nil, args...)
+	if err != nil {
+		return nil, fmt.Errorf("rename_failed: %w", err)
+	}
+
+	renamed, err := d.z.Get(ctx, newName, false)
+	if err != nil {
+		return nil, fmt.Errorf("error_getting_renamed_dataset: %w", err)
+	}
+
+	if renamed == nil {
+		return nil, fmt.Errorf("rename_succeeded_but_dataset_not_found: %s", newName)
+	}
+
+	return renamed, nil
 }
