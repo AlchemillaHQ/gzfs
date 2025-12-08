@@ -1,8 +1,10 @@
 package gzfs
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"maps"
 	"os"
 	"strconv"
@@ -436,6 +438,121 @@ func (z *zfs) Clone(ctx context.Context, srcSnapshot, dest string, properties ma
 	return ds, nil
 }
 
+func (z *zfs) Rename(ctx context.Context, oldName, newName string, recursive bool) (*Dataset, error) {
+	if z == nil {
+		return nil, fmt.Errorf("zfs client is nil")
+	}
+
+	if oldName == "" {
+		return nil, fmt.Errorf("old name cannot be empty")
+	}
+
+	if newName == "" {
+		return nil, fmt.Errorf("new name cannot be empty")
+	}
+
+	ds, err := z.Get(ctx, oldName, false)
+	if err != nil {
+		return nil, fmt.Errorf("error_getting_source_dataset: %w", err)
+	}
+	if ds == nil {
+		return nil, fmt.Errorf("dataset_not_found: %s", oldName)
+	}
+
+	args := []string{"rename"}
+	if recursive && ds.Type != DatasetTypeSnapshot {
+		return nil, fmt.Errorf("recursive_rename_only_allowed_for_snapshots")
+	}
+
+	args = append(args, oldName, newName)
+
+	if _, _, err := z.cmd.RunBytes(ctx, nil, args...); err != nil {
+		return nil, fmt.Errorf("rename_failed: %w", err)
+	}
+
+	renamed, err := z.Get(ctx, newName, false)
+	if err != nil {
+		return nil, fmt.Errorf("error_getting_renamed_dataset: %w", err)
+	}
+
+	if renamed == nil {
+		return nil, fmt.Errorf("rename_succeeded_but_dataset_not_found: %s", newName)
+	}
+
+	return renamed, nil
+}
+
+func (z *zfs) SendToDataset(ctx context.Context, srcSnapshot, dest string, force bool) (*Dataset, error) {
+	if z == nil {
+		return nil, fmt.Errorf("zfs client is nil")
+	}
+	if srcSnapshot == "" {
+		return nil, fmt.Errorf("source snapshot name is empty")
+	}
+	if dest == "" {
+		return nil, fmt.Errorf("destination name is empty")
+	}
+
+	srcDs, err := z.Get(ctx, srcSnapshot, false)
+	if err != nil {
+		return nil, fmt.Errorf("error_getting_source_dataset: %w", err)
+	}
+	if srcDs == nil {
+		return nil, fmt.Errorf("source_snapshot_not_found: %s", srcSnapshot)
+	}
+	if srcDs.Type != DatasetTypeSnapshot {
+		return nil, fmt.Errorf("can_only_send_from_snapshots")
+	}
+
+	pr, pw := io.Pipe()
+	sendErrCh := make(chan error, 1)
+
+	go func() {
+		defer pw.Close()
+
+		var sendStderr bytes.Buffer
+		sendArgs := []string{"send", srcSnapshot}
+
+		err := z.cmd.RunStream(ctx, nil, pw, &sendStderr, sendArgs...)
+		if err != nil {
+			sendErrCh <- fmt.Errorf("send_failed: %w", err)
+			return
+		}
+		sendErrCh <- nil
+	}()
+
+	var recvStderr bytes.Buffer
+	recvArgs := []string{"recv"}
+	if force {
+		recvArgs = append(recvArgs, "-F")
+	}
+	recvArgs = append(recvArgs, dest)
+
+	if err := z.cmd.RunStream(ctx, pr, nil, &recvStderr, recvArgs...); err != nil {
+		_ = pr.Close()
+		if sendErr := <-sendErrCh; sendErr != nil {
+			return nil, sendErr
+		}
+		return nil, fmt.Errorf("recv_failed: %w", err)
+	}
+
+	if sendErr := <-sendErrCh; sendErr != nil {
+		return nil, sendErr
+	}
+
+	ds, err := z.Get(ctx, dest, false)
+
+	if err != nil {
+		return nil, fmt.Errorf("error_getting_destination_dataset: %w", err)
+	}
+
+	if ds == nil {
+		return nil, fmt.Errorf("send_recv_succeeded_but_dataset_not_found: %s", dest)
+	}
+
+	return ds, nil
+}
+
 func (d *Dataset) SetProperties(ctx context.Context, kvPairs ...string) error {
 	if d == nil {
 		return fmt.Errorf("dataset is nil")
@@ -633,7 +750,7 @@ func (d *Dataset) Clone(ctx context.Context, dest string, properties map[string]
 	return d.z.Clone(ctx, d.Name, dest, properties)
 }
 
-func (d *Dataset) Rename(ctx context.Context, newName string) (*Dataset, error) {
+func (d *Dataset) Rename(ctx context.Context, newName string, recursive bool) (*Dataset, error) {
 	if d == nil {
 		return nil, fmt.Errorf("dataset is nil")
 	}
@@ -646,21 +763,21 @@ func (d *Dataset) Rename(ctx context.Context, newName string) (*Dataset, error) 
 		return nil, fmt.Errorf("new name cannot be empty")
 	}
 
-	args := []string{"rename", d.Name, newName}
+	return d.z.Rename(ctx, d.Name, newName, recursive)
+}
 
-	_, _, err := d.z.cmd.RunBytes(ctx, nil, args...)
-	if err != nil {
-		return nil, fmt.Errorf("rename_failed: %w", err)
+func (d *Dataset) SendToDataset(ctx context.Context, dest string, force bool) (*Dataset, error) {
+	if d == nil {
+		return nil, fmt.Errorf("dataset is nil")
 	}
 
-	renamed, err := d.z.Get(ctx, newName, false)
-	if err != nil {
-		return nil, fmt.Errorf("error_getting_renamed_dataset: %w", err)
+	if d.z == nil {
+		return nil, fmt.Errorf("no zfs client attached")
 	}
 
-	if renamed == nil {
-		return nil, fmt.Errorf("rename_succeeded_but_dataset_not_found: %s", newName)
+	if d.Type != DatasetTypeSnapshot {
+		return nil, fmt.Errorf("can_only_send_from_snapshots")
 	}
 
-	return renamed, nil
+	return d.z.SendToDataset(ctx, d.Name, dest, force)
 }
