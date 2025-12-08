@@ -46,9 +46,11 @@ type ZPool struct {
 	SPAVersion string     `json:"spa_version"`
 	ZPLVersion string     `json:"zpl_version"`
 
-	Size  uint64 `json:"size"`
-	Free  uint64 `json:"free"`
-	Alloc uint64 `json:"allocated"`
+	Size          uint64  `json:"size"`
+	Free          uint64  `json:"free"`
+	Alloc         uint64  `json:"allocated"`
+	Fragmentation float64 `json:"fragmentation"`
+	DedupRatio    float64 `json:"dedup_ratio"`
 
 	Properties map[string]ZFSProperty `json:"properties"`
 }
@@ -114,6 +116,8 @@ func (z *zpool) List(ctx context.Context) ([]*ZPool, error) {
 		p.Size = ParseSize(p.Properties["size"].Value)
 		p.Free = ParseSize(p.Properties["free"].Value)
 		p.Alloc = ParseSize(p.Properties["allocated"].Value)
+		p.Fragmentation = ParsePercentage(p.Properties["fragmentation"].Value)
+		p.DedupRatio = ParseRatio(p.Properties["dedupratio"].Value)
 
 		pools = append(pools, p)
 	}
@@ -140,6 +144,8 @@ func (z *zpool) Get(ctx context.Context, name string) (*ZPool, error) {
 	pool.Size = ParseSize(pool.Properties["size"].Value)
 	pool.Free = ParseSize(pool.Properties["free"].Value)
 	pool.Alloc = ParseSize(pool.Properties["allocated"].Value)
+	pool.Fragmentation = ParsePercentage(pool.Properties["fragmentation"].Value)
+	pool.DedupRatio = ParseRatio(pool.Properties["dedupratio"].Value)
 
 	return pool, nil
 }
