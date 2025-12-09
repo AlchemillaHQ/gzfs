@@ -150,6 +150,32 @@ func (z *zpool) Get(ctx context.Context, name string) (*ZPool, error) {
 	return pool, nil
 }
 
+func (z *zpool) GetByGUID(ctx context.Context, guid string) (*ZPool, error) {
+	var resp ZPoolList
+
+	args := append([]string{"list", "-o", "guid"}, zpoolArgs...)
+	args = append(args, "-P")
+
+	if err := z.cmd.RunJSON(ctx, &resp, args...); err != nil {
+		return nil, err
+	}
+
+	var found *ZPool
+
+	for _, pool := range resp.Pools {
+		if pool.PoolGUID == guid {
+			found = pool
+			break
+		}
+	}
+
+	if found == nil {
+		return nil, fmt.Errorf("pool with GUID %q not found", guid)
+	}
+
+	return z.Get(ctx, found.Name)
+}
+
 func (z *zpool) GetPoolNames(ctx context.Context) ([]string, error) {
 	var resp ZPoolList
 
@@ -169,12 +195,17 @@ func (z *zpool) GetPoolNames(ctx context.Context) ([]string, error) {
 }
 
 func (z *zpool) GetPoolGUID(ctx context.Context, name string) (string, error) {
-	pool, err := z.Get(ctx, name)
-	if err != nil {
+	var resp ZPoolList
+
+	args := append([]string{"list", "-o", "guid"}, zpoolArgs...)
+	args = append(args, name, "-P")
+
+	if err := z.cmd.RunJSON(ctx, &resp, args...); err != nil {
 		return "", err
 	}
 
-	if pool == nil {
+	pool, ok := resp.Pools[name]
+	if !ok {
 		return "", fmt.Errorf("pool %q not found", name)
 	}
 

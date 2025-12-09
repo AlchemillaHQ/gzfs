@@ -60,7 +60,10 @@ func toZfsType(t DatasetType) string {
 }
 
 func (z *zfs) listArgs(name string, recursive bool, t *DatasetType) []string {
-	args := append([]string{"list", "-o", "all"}, zfsArgs...)
+	args := append(
+		[]string{"list", "-o", strings.Join(dsPropList, ",")},
+		zfsArgs...,
+	)
 
 	if recursive {
 		args = append(args, "-r")

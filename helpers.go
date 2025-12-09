@@ -24,9 +24,15 @@ type ZFSPropertySource struct {
 }
 
 var (
-	zdbArgs   = []string{"-C"}
-	zpoolArgs = []string{"-p"}
-	zfsArgs   = []string{"-p"}
+	zdbArgs    = []string{"-C"}
+	zpoolArgs  = []string{"-p"}
+	zfsArgs    = []string{"-p"}
+	dsPropList = []string{
+		"name", "origin", "used", "available", "recordsize", "mountpoint",
+		"compression", "type", "volsize", "quota", "referenced", "written",
+		"logicalused", "usedbydataset", "guid", "mounted", "checksum",
+		"aclmode", "aclinherit", "primarycache", "volmode", "compressratio",
+	}
 )
 
 func ParseSize(value string) uint64 {
