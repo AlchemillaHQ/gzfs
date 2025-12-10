@@ -337,6 +337,74 @@ func (z *zpool) Create(ctx context.Context, name string, force bool, properties 
 	return err
 }
 
+func findVdevByPath(v *ZPoolStatusVDEV, devicePath string) *ZPoolStatusVDEV {
+	if v == nil {
+		return nil
+	}
+
+	if v.Path == devicePath {
+		return v
+	}
+
+	for _, child := range v.Vdevs {
+		if found := findVdevByPath(child, devicePath); found != nil {
+			return found
+		}
+	}
+
+	return nil
+}
+
+func findVdevByPathInMap(m map[string]*ZPoolStatusVDEV, devicePath string) *ZPoolStatusVDEV {
+	for _, v := range m {
+		if found := findVdevByPath(v, devicePath); found != nil {
+			return found
+		}
+	}
+	return nil
+}
+
+func (z *zpool) IsDeviceInZpool(ctx context.Context, devicePath string) (bool, string, error) {
+	if devicePath == "" {
+		return false, "", fmt.Errorf("devicePath must not be empty")
+	}
+
+	pools, err := z.List(ctx)
+	if err != nil {
+		return false, "", fmt.Errorf("failed to list pools: %w", err)
+	}
+
+	for _, p := range pools {
+		status, err := p.Status(ctx)
+		if err != nil {
+			return false, "", fmt.Errorf("failed to get status for pool %q: %w", p.Name, err)
+		}
+
+		poolStatus, ok := status.Pools[p.Name]
+		if !ok {
+			continue
+		}
+
+		if v := findVdevByPathInMap(poolStatus.Vdevs, devicePath); v != nil {
+			return true, p.Name, nil
+		}
+
+		if v := findVdevByPathInMap(poolStatus.Logs, devicePath); v != nil {
+			return true, p.Name, nil
+		}
+
+		if v := findVdevByPathInMap(poolStatus.Spares, devicePath); v != nil {
+			return true, p.Name, nil
+		}
+
+		if v := findVdevByPathInMap(poolStatus.L2Cache, devicePath); v != nil {
+			return true, p.Name, nil
+		}
+	}
+
+	return false, "", nil
+}
+
 func (z *ZPool) ZDB(ctx context.Context) (*ZDBPool, error) {
 	if z.z == nil {
 		return nil, fmt.Errorf("no zpool client attached")
