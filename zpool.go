@@ -8,6 +8,7 @@ import (
 type zpool struct {
 	cmd Cmd
 	zdb *zdb
+	zfs *zfs
 }
 
 type ZPoolState string
@@ -212,6 +213,29 @@ func (z *zpool) GetPoolGUID(ctx context.Context, name string) (string, error) {
 	return pool.PoolGUID, nil
 }
 
+func (z *zpool) SetProperty(ctx context.Context, name, property, value string) error {
+	names, err := z.GetPoolNames(ctx)
+	if err != nil {
+		return err
+	}
+
+	found := false
+	for _, n := range names {
+		if n == name {
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		return fmt.Errorf("pool %q not found", name)
+	}
+
+	args := []string{"set", fmt.Sprintf("%s=%s", property, value), name}
+	_, _, err = z.cmd.RunBytes(ctx, nil, args...)
+	return err
+}
+
 func (z *zpool) GetProperties(ctx context.Context, name string) (map[string]ZFSProperty, error) {
 	var resp ZPoolList
 
@@ -341,4 +365,28 @@ func (p *ZPool) RemoveSpare(ctx context.Context, device string) error {
 		return fmt.Errorf("pool_remove_spare_failed: %w", err)
 	}
 	return nil
+}
+
+func (p *ZPool) SetProperty(ctx context.Context, property, value string) error {
+	if p.z == nil {
+		return fmt.Errorf("no zpool client attached")
+	}
+
+	return p.z.SetProperty(ctx, p.Name, property, value)
+}
+
+func (p *ZPool) GetProperties(ctx context.Context) (map[string]ZFSProperty, error) {
+	if p.z == nil {
+		return nil, fmt.Errorf("no zpool client attached")
+	}
+
+	return p.z.GetProperties(ctx, p.Name)
+}
+
+func (p *ZPool) Datasets(ctx context.Context, t DatasetType) ([]*Dataset, error) {
+	if p.z == nil || p.z.zfs == nil {
+		return nil, fmt.Errorf("no zpool or zfs client attached")
+	}
+
+	return p.z.zfs.ListWithPrefix(ctx, t, p.Name, true)
 }

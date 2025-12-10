@@ -72,6 +72,16 @@ func main() {
 				log.Fatalf("zpool status error for pool %q: %v", pool.Name, err)
 			}
 			fmt.Printf("  Status State: %s\n", status.Pools[pool.Name].State)
+
+			datasets, err := pool.Datasets(ctx, gzfs.DatasetTypeAll)
+			if err != nil {
+				log.Fatalf("error getting datasets for pool %q: %v", pool.Name, err)
+			}
+
+			fmt.Printf("  Datasets:\n")
+			for _, ds := range datasets {
+				fmt.Printf("    - %s\n", ds.Name)
+			}
 		}
 	}
 }

@@ -166,11 +166,12 @@ func NewClient(opts Options) *Client {
 		zdbCacheTTL = 5 * time.Minute
 	}
 
+	zfsC := &zfs{cmd: zfsCmd}
 	zdbC := &zdb{cmd: zdbCmd, cacheTTL: zdbCacheTTL}
-	zpoolC := &zpool{cmd: zpoolCmd, zdb: zdbC}
+	zpoolC := &zpool{cmd: zpoolCmd, zdb: zdbC, zfs: zfsC}
 
 	return &Client{
-		ZFS:   &zfs{cmd: zfsCmd},
+		ZFS:   zfsC,
 		Zpool: zpoolC,
 		ZDB:   zdbC,
 	}

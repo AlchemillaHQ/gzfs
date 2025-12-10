@@ -18,6 +18,7 @@ type zfs struct {
 type DatasetType string
 
 const (
+	DatasetTypeAll        DatasetType = "ALL"
 	DatasetTypeFilesystem DatasetType = "FILESYSTEM"
 	DatasetTypeVolume     DatasetType = "VOLUME"
 	DatasetTypeSnapshot   DatasetType = "SNAPSHOT"
@@ -106,6 +107,47 @@ func (z *zfs) List(ctx context.Context, recursive bool, name ...string) ([]*Data
 		d.Compressratio = ParseRatio(d.Properties["compressratio"].Value)
 
 		datasets = append(datasets, d)
+	}
+
+	return datasets, nil
+}
+
+func (z *zfs) ListWithPrefix(ctx context.Context, t DatasetType, prefix string, recursive bool) ([]*Dataset, error) {
+	var resp DatasetList
+	var dType *DatasetType
+
+	if t == DatasetTypeAll {
+		dType = nil
+	} else {
+		dType = &t
+	}
+
+	if prefix == "" {
+		args := z.listArgs("", recursive, dType)
+		if err := z.cmd.RunJSON(ctx, &resp, args...); err != nil {
+			return nil, err
+		}
+	} else {
+		args := z.listArgs(prefix, recursive, dType)
+		if err := z.cmd.RunJSON(ctx, &resp, args...); err != nil {
+			return nil, err
+		}
+	}
+
+	datasets := make([]*Dataset, 0, len(resp.Datasets))
+	for _, d := range resp.Datasets {
+		if prefix == "" || strings.HasPrefix(d.Name, prefix) {
+			d.z = z
+
+			d.GUID = ParseString(d.Properties["guid"].Value)
+			d.Mountpoint = ParseString(d.Properties["mountpoint"].Value)
+			d.Used = ParseSize(d.Properties["used"].Value)
+			d.Available = ParseSize(d.Properties["available"].Value)
+			d.Referenced = ParseSize(d.Properties["referenced"].Value)
+			d.Compressratio = ParseRatio(d.Properties["compressratio"].Value)
+
+			datasets = append(datasets, d)
+		}
 	}
 
 	return datasets, nil
