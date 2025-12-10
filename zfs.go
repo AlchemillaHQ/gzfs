@@ -178,6 +178,34 @@ func (z *zfs) Get(ctx context.Context, name string, recursive bool) (*Dataset, e
 	return dataset, nil
 }
 
+func (z *zfs) GetByGUID(ctx context.Context, guid string, recursive bool) (*Dataset, error) {
+	var resp DatasetList
+
+	args := append([]string{"get"}, zfsArgs...)
+	args = append(args, "-H", "-o", "name,value", "guid")
+
+	if err := z.cmd.RunJSON(ctx, &resp, args...); err != nil {
+		return nil, err
+	}
+
+	var datasetName string
+	for name, ds := range resp.Datasets {
+		if ds != nil {
+			dsGUID := ParseString(ds.Properties["guid"].Value)
+			if dsGUID == guid {
+				datasetName = name
+				break
+			}
+		}
+	}
+
+	if datasetName == "" {
+		return nil, nil
+	}
+
+	return z.Get(ctx, datasetName, recursive)
+}
+
 func (z *zfs) GetProperty(ctx context.Context, datasetName, propName string) (ZFSProperty, error) {
 	var resp DatasetList
 
