@@ -120,38 +120,56 @@ func (p *ZPool) UnmarshalJSON(data []byte) error {
 	p.L2Cache = make(map[string]*ZPoolVDEV)
 	p.Spares = make(map[string]*ZPoolVDEV)
 
+	populateParsedFields := func(v *ZPoolVDEV) {
+		if v == nil || v.Properties == nil {
+			return
+		}
+		if s, ok := v.Properties["size"]; ok {
+			v.Size = ParseSize(s.Value)
+		}
+		if f, ok := v.Properties["free"]; ok {
+			v.Free = ParseSize(f.Value)
+		}
+		if a, ok := v.Properties["allocated"]; ok {
+			v.Alloc = ParseSize(a.Value)
+		}
+		if frag, ok := v.Properties["fragmentation"]; ok {
+			v.Fragmentation = ParsePercentage(frag.Value)
+		}
+	}
+
+	decodeGroup := func(raw json.RawMessage, dest map[string]*ZPoolVDEV) error {
+		var m map[string]*ZPoolVDEV
+		if err := json.Unmarshal(raw, &m); err != nil {
+			return err
+		}
+		for name, v := range m {
+			if v == nil {
+				continue
+			}
+			if v.Name == "" {
+				v.Name = name
+			}
+			populateParsedFields(v)
+			dest[name] = v
+		}
+		return nil
+	}
+
 	for k, raw := range aux.RawVdevs {
 		switch k {
-		case "logs", "l2cache", "spares":
-			var m map[string]*ZPoolVDEV
-			if err := json.Unmarshal(raw, &m); err != nil {
+		case "logs":
+			if err := decodeGroup(raw, p.Logs); err != nil {
 				return fmt.Errorf("decode %s vdevs: %w", k, err)
 			}
-
-			switch k {
-			case "logs":
-				for name, v := range m {
-					if v.Name == "" {
-						v.Name = name
-					}
-					p.Logs[name] = v
-				}
-			case "l2cache":
-				for name, v := range m {
-					if v.Name == "" {
-						v.Name = name
-					}
-					p.L2Cache[name] = v
-				}
-			case "spares":
-				for name, v := range m {
-					if v.Name == "" {
-						v.Name = name
-					}
-					p.Spares[name] = v
-				}
+		case "l2cache":
+			if err := decodeGroup(raw, p.L2Cache); err != nil {
+				return fmt.Errorf("decode %s vdevs: %w", k, err)
 			}
-
+		case "spares":
+			if err := decodeGroup(raw, p.Spares); err != nil {
+				return fmt.Errorf("decode %s vdevs: %w", k, err)
+			}
 		default:
 			var v ZPoolVDEV
 			if err := json.Unmarshal(raw, &v); err != nil {
@@ -160,9 +178,7 @@ func (p *ZPool) UnmarshalJSON(data []byte) error {
 			if v.Name == "" {
 				v.Name = k
 			}
-			if p.Vdevs == nil {
-				p.Vdevs = make(map[string]*ZPoolVDEV)
-			}
+			populateParsedFields(&v)
 			p.Vdevs[k] = &v
 		}
 	}
