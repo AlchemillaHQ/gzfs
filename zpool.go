@@ -24,7 +24,7 @@ const (
 	ZPoolStateUnknown     ZPoolState = "UNKNOWN"
 )
 
-type ZPoolVDEV struct {
+type ZPoolStatusVDEV struct {
 	Name        string `json:"name"`
 	VdevType    string `json:"vdev_type"`
 	GUID        string `json:"guid"`
@@ -38,6 +38,24 @@ type ZPoolVDEV struct {
 	ReadErrors  string `json:"read_errors"`
 	WriteErrors string `json:"write_errors"`
 	ChkErrors   string `json:"checksum_errors"`
+
+	Properties map[string]ZFSProperty      `json:"properties"`
+	Vdevs      map[string]*ZPoolStatusVDEV `json:"vdevs"`
+}
+
+type ZPoolVDEV struct {
+	Name     string `json:"name"`
+	VdevType string `json:"vdev_type"`
+	GUID     string `json:"guid"`
+	Path     string `json:"path"`
+	PhysPath string `json:"phys_path"`
+	Class    string `json:"class"`
+	State    string `json:"state"`
+
+	Size          uint64  `json:"size"`
+	Free          uint64  `json:"free"`
+	Alloc         uint64  `json:"allocated"`
+	Fragmentation float64 `json:"fragmentation"`
 
 	Properties map[string]ZFSProperty `json:"properties"`
 	Vdevs      map[string]*ZPoolVDEV  `json:"vdevs"`
@@ -61,6 +79,7 @@ type ZPool struct {
 	DedupRatio    float64 `json:"dedup_ratio"`
 
 	Properties map[string]ZFSProperty `json:"properties"`
+	Vdevs      map[string]*ZPoolVDEV  `json:"vdevs"`
 }
 
 type ZPoolList struct {
@@ -96,11 +115,11 @@ type ZPoolStatusPool struct {
 	Status     string `json:"status"`
 	Action     string `json:"action"`
 
-	ScanStats *ZPoolStatusScanStats `json:"scan_stats"`
-	Vdevs     map[string]*ZPoolVDEV `json:"vdevs"`
-	Logs      map[string]*ZPoolVDEV `json:"logs"`
-	Spares    map[string]*ZPoolVDEV `json:"spares"`
-	L2Cache   map[string]*ZPoolVDEV `json:"l2cache"`
+	ScanStats *ZPoolStatusScanStats       `json:"scan_stats"`
+	Vdevs     map[string]*ZPoolStatusVDEV `json:"vdevs"`
+	Logs      map[string]*ZPoolStatusVDEV `json:"logs"`
+	Spares    map[string]*ZPoolStatusVDEV `json:"spares"`
+	L2Cache   map[string]*ZPoolStatusVDEV `json:"l2cache"`
 }
 
 type ZPoolStatus struct {
@@ -108,10 +127,59 @@ type ZPoolStatus struct {
 	Pools         map[string]*ZPoolStatusPool `json:"pools"`
 }
 
+func normalizeVdev(v *ZPoolVDEV) {
+	if v == nil || v.Properties == nil {
+		return
+	}
+
+	if prop, ok := v.Properties["size"]; ok {
+		v.Size = ParseSize(prop.Value)
+	}
+	if prop, ok := v.Properties["free"]; ok {
+		v.Free = ParseSize(prop.Value)
+	}
+	if prop, ok := v.Properties["allocated"]; ok {
+		v.Alloc = ParseSize(prop.Value)
+	}
+	if prop, ok := v.Properties["fragmentation"]; ok {
+		v.Fragmentation = ParsePercentage(prop.Value)
+	}
+
+	for _, child := range v.Vdevs {
+		normalizeVdev(child)
+	}
+}
+
+func normalizePool(p *ZPool, z *zpool) {
+	p.z = z
+
+	if p.Properties != nil {
+		if prop, ok := p.Properties["size"]; ok {
+			p.Size = ParseSize(prop.Value)
+		}
+		if prop, ok := p.Properties["free"]; ok {
+			p.Free = ParseSize(prop.Value)
+		}
+		if prop, ok := p.Properties["allocated"]; ok {
+			p.Alloc = ParseSize(prop.Value)
+		}
+		if prop, ok := p.Properties["fragmentation"]; ok {
+			p.Fragmentation = ParsePercentage(prop.Value)
+		}
+		if prop, ok := p.Properties["dedupratio"]; ok {
+			p.DedupRatio = ParseRatio(prop.Value)
+		}
+	}
+
+	for _, v := range p.Vdevs {
+		normalizeVdev(v)
+	}
+}
+
 func (z *zpool) List(ctx context.Context) ([]*ZPool, error) {
 	var resp ZPoolList
 
-	args := append([]string{"list", "-o", "all"}, zpoolArgs...)
+	args := append([]string{"list", "-o", "all", "-v"}, zpoolArgs...)
 	args = append(args, "-P")
 
 	if err := z.cmd.RunJSON(ctx, &resp, args...); err != nil {
@@ -120,13 +188,7 @@ func (z *zpool) List(ctx context.Context) ([]*ZPool, error) {
 
 	pools := make([]*ZPool, 0, len(resp.Pools))
 	for _, p := range resp.Pools {
-		p.z = z
-		p.Size = ParseSize(p.Properties["size"].Value)
-		p.Free = ParseSize(p.Properties["free"].Value)
-		p.Alloc = ParseSize(p.Properties["allocated"].Value)
-		p.Fragmentation = ParsePercentage(p.Properties["fragmentation"].Value)
-		p.DedupRatio = ParseRatio(p.Properties["dedupratio"].Value)
-
+		normalizePool(p, z)
 		pools = append(pools, p)
 	}
 
@@ -136,7 +198,7 @@ func (z *zpool) List(ctx context.Context) ([]*ZPool, error) {
 func (z *zpool) Get(ctx context.Context, name string) (*ZPool, error) {
 	var resp ZPoolList
 
-	args := append([]string{"list", "-o", "all"}, zpoolArgs...)
+	args := append([]string{"list", "-o", "all", "-v"}, zpoolArgs...)
 	args = append(args, name, "-P")
 
 	if err := z.cmd.RunJSON(ctx, &resp, args...); err != nil {
@@ -148,12 +210,7 @@ func (z *zpool) Get(ctx context.Context, name string) (*ZPool, error) {
 		return nil, nil
 	}
 
-	pool.z = z
-	pool.Size = ParseSize(pool.Properties["size"].Value)
-	pool.Free = ParseSize(pool.Properties["free"].Value)
-	pool.Alloc = ParseSize(pool.Properties["allocated"].Value)
-	pool.Fragmentation = ParsePercentage(pool.Properties["fragmentation"].Value)
-	pool.DedupRatio = ParseRatio(pool.Properties["dedupratio"].Value)
+	normalizePool(pool, z)
 
 	return pool, nil
 }
@@ -418,7 +475,7 @@ func (p *ZPool) ReplaceDevice(ctx context.Context, oldDevice, newDevice string, 
 	return err
 }
 
-func maxRepDevSize(v *ZPoolVDEV) uint64 {
+func maxRepDevSize(v *ZPoolStatusVDEV) uint64 {
 	if v == nil {
 		return 0
 	}

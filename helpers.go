@@ -162,11 +162,12 @@ func ParseString(value string) string {
 
 func ParsePercentage(value string) float64 {
 	v := strings.TrimSpace(value)
-	v = strings.TrimSuffix(v, "%")
 
-	if v == "" {
+	if v == "" || v == "-" {
 		return 0
 	}
+
+	v = strings.TrimSuffix(v, "%")
 
 	f, err := strconv.ParseFloat(v, 64)
 	if err != nil {
