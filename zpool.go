@@ -25,12 +25,19 @@ const (
 )
 
 type ZPoolVDEV struct {
-	Name     string `json:"name"`
-	VdevType string `json:"vdev_type"`
-	GUID     string `json:"guid"`
-	Path     string `json:"path"`
-	Class    string `json:"class"`
-	State    string `json:"state"`
+	Name        string `json:"name"`
+	VdevType    string `json:"vdev_type"`
+	GUID        string `json:"guid"`
+	Path        string `json:"path"`
+	Class       string `json:"class"`
+	State       string `json:"state"`
+	AllocSpace  string `json:"alloc_space"`
+	TotalSpace  string `json:"total_space"`
+	DefSpace    string `json:"def_space"`
+	RepDevSize  string `json:"rep_dev_size"`
+	ReadErrors  string `json:"read_errors"`
+	WriteErrors string `json:"write_errors"`
+	ChkErrors   string `json:"checksum_errors"`
 
 	Properties map[string]ZFSProperty `json:"properties"`
 	Vdevs      map[string]*ZPoolVDEV  `json:"vdevs"`
@@ -89,11 +96,11 @@ type ZPoolStatusPool struct {
 	Status     string `json:"status"`
 	Action     string `json:"action"`
 
-	ScanStats *ZPoolStatusScanStats            `json:"scan_stats"`
-	Vdevs     map[string]*ZPoolStatusScanStats `json:"vdevs"`
-	Logs      map[string]*ZPoolStatusScanStats `json:"logs"`
-	Spares    map[string]*ZPoolStatusScanStats `json:"spares"`
-	Caches    map[string]*ZPoolStatusScanStats `json:"caches"`
+	ScanStats *ZPoolStatusScanStats `json:"scan_stats"`
+	Vdevs     map[string]*ZPoolVDEV `json:"vdevs"`
+	Logs      map[string]*ZPoolVDEV `json:"logs"`
+	Spares    map[string]*ZPoolVDEV `json:"spares"`
+	L2Cache   map[string]*ZPoolVDEV `json:"l2cache"`
 }
 
 type ZPoolStatus struct {
@@ -322,7 +329,7 @@ func (p *ZPool) Status(ctx context.Context) (*ZPoolStatus, error) {
 	var resp ZPoolStatus
 
 	args := append([]string{"status"}, zpoolArgs...)
-	args = append(args, p.Name, "-P")
+	args = append(args, p.Name, "-P", "-v")
 
 	if err := p.z.cmd.RunJSON(ctx, &resp, args...); err != nil {
 		return nil, err
@@ -409,4 +416,52 @@ func (p *ZPool) ReplaceDevice(ctx context.Context, oldDevice, newDevice string, 
 	_, _, err := p.z.cmd.RunBytes(ctx, nil, args...)
 
 	return err
+}
+
+func maxRepDevSize(v *ZPoolVDEV) uint64 {
+	if v == nil {
+		return 0
+	}
+
+	max := ParseSize(v.RepDevSize)
+
+	for _, child := range v.Vdevs {
+		childMax := maxRepDevSize(child)
+		if childMax > max {
+			max = childMax
+		}
+	}
+
+	return max
+}
+
+func (p *ZPool) RequiredSpareSize(ctx context.Context) (uint64, error) {
+	if p.z == nil {
+		return 0, fmt.Errorf("no zpool client attached")
+	}
+
+	status, err := p.Status(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get pool status: %w", err)
+	}
+
+	poolStatus, ok := status.Pools[p.Name]
+	if !ok {
+		return 0, fmt.Errorf("pool %q not found in status", p.Name)
+	}
+
+	var maxSize uint64
+
+	for _, v := range poolStatus.Vdevs {
+		size := maxRepDevSize(v)
+		if size > maxSize {
+			maxSize = size
+		}
+	}
+
+	if maxSize == 0 {
+		return 0, fmt.Errorf("unable to determine required spare size")
+	}
+
+	return maxSize, nil
 }

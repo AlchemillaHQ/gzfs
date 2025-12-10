@@ -82,6 +82,13 @@ func main() {
 			for _, ds := range datasets {
 				fmt.Printf("    - %s\n", ds.Name)
 			}
+
+			reqSpareSize, err := pool.RequiredSpareSize(ctx)
+			if err != nil {
+				log.Fatalf("error getting required spare size for pool %q: %v", pool.Name, err)
+			}
+
+			fmt.Printf("  Required Spare Size: %d bytes\n", reqSpareSize)
 		}
 	}
 }
