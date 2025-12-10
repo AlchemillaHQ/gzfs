@@ -2,6 +2,7 @@ package gzfs
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 )
 
@@ -79,7 +80,94 @@ type ZPool struct {
 	DedupRatio    float64 `json:"dedup_ratio"`
 
 	Properties map[string]ZFSProperty `json:"properties"`
-	Vdevs      map[string]*ZPoolVDEV  `json:"vdevs"`
+
+	Vdevs   map[string]*ZPoolVDEV `json:"-"`
+	Logs    map[string]*ZPoolVDEV `json:"logs"`
+	L2Cache map[string]*ZPoolVDEV `json:"l2cache"`
+	Spares  map[string]*ZPoolVDEV `json:"spares"`
+}
+
+func (p *ZPool) MarshalJSON() ([]byte, error) {
+	type Alias ZPool
+
+	out := struct {
+		*Alias
+		Vdevs map[string]*ZPoolVDEV `json:"vdevs"`
+	}{
+		Alias: (*Alias)(p),
+		Vdevs: p.Vdevs,
+	}
+
+	return json.Marshal(&out)
+}
+
+func (p *ZPool) UnmarshalJSON(data []byte) error {
+	type Alias ZPool
+
+	aux := struct {
+		*Alias
+		RawVdevs map[string]json.RawMessage `json:"vdevs"`
+	}{
+		Alias: (*Alias)(p),
+	}
+
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+
+	p.Vdevs = make(map[string]*ZPoolVDEV)
+	p.Logs = make(map[string]*ZPoolVDEV)
+	p.L2Cache = make(map[string]*ZPoolVDEV)
+	p.Spares = make(map[string]*ZPoolVDEV)
+
+	for k, raw := range aux.RawVdevs {
+		switch k {
+		case "logs", "l2cache", "spares":
+			var m map[string]*ZPoolVDEV
+			if err := json.Unmarshal(raw, &m); err != nil {
+				return fmt.Errorf("decode %s vdevs: %w", k, err)
+			}
+
+			switch k {
+			case "logs":
+				for name, v := range m {
+					if v.Name == "" {
+						v.Name = name
+					}
+					p.Logs[name] = v
+				}
+			case "l2cache":
+				for name, v := range m {
+					if v.Name == "" {
+						v.Name = name
+					}
+					p.L2Cache[name] = v
+				}
+			case "spares":
+				for name, v := range m {
+					if v.Name == "" {
+						v.Name = name
+					}
+					p.Spares[name] = v
+				}
+			}
+
+		default:
+			var v ZPoolVDEV
+			if err := json.Unmarshal(raw, &v); err != nil {
+				return fmt.Errorf("decode vdev %q: %w", k, err)
+			}
+			if v.Name == "" {
+				v.Name = k
+			}
+			if p.Vdevs == nil {
+				p.Vdevs = make(map[string]*ZPoolVDEV)
+			}
+			p.Vdevs[k] = &v
+		}
+	}
+
+	return nil
 }
 
 type ZPoolList struct {
