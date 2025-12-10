@@ -390,3 +390,23 @@ func (p *ZPool) Datasets(ctx context.Context, t DatasetType) ([]*Dataset, error)
 
 	return p.z.zfs.ListWithPrefix(ctx, t, p.Name, true)
 }
+
+func (p *ZPool) ReplaceDevice(ctx context.Context, oldDevice, newDevice string, force bool) error {
+	if oldDevice == "" || newDevice == "" {
+		return fmt.Errorf("oldDevice and newDevice must not be empty")
+	}
+
+	if p.z == nil {
+		return fmt.Errorf("no zpool client attached")
+	}
+
+	args := []string{"replace"}
+	if force {
+		args = append(args, "-f")
+	}
+
+	args = append(args, p.Name, oldDevice, newDevice)
+	_, _, err := p.z.cmd.RunBytes(ctx, nil, args...)
+
+	return err
+}
