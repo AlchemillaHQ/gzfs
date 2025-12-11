@@ -40,8 +40,7 @@ type ZPoolStatusVDEV struct {
 	WriteErrors string `json:"write_errors"`
 	ChkErrors   string `json:"checksum_errors"`
 
-	Properties map[string]ZFSProperty      `json:"properties"`
-	Vdevs      map[string]*ZPoolStatusVDEV `json:"vdevs"`
+	Vdevs map[string]*ZPoolStatusVDEV `json:"vdevs"`
 }
 
 type ZPoolVDEV struct {
