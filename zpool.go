@@ -381,6 +381,24 @@ func (z *zpool) GetPoolGUID(ctx context.Context, name string) (string, error) {
 	return pool.PoolGUID, nil
 }
 
+func (z *zpool) GetPoolStatus(ctx context.Context, name string) (*ZPoolStatusPool, error) {
+	var resp ZPoolStatus
+
+	args := append([]string{"status"}, zpoolArgs...)
+	args = append(args, name, "-P", "-v")
+
+	if err := z.cmd.RunJSON(ctx, &resp, args...); err != nil {
+		return nil, err
+	}
+
+	pool, ok := resp.Pools[name]
+	if !ok {
+		return nil, fmt.Errorf("pool %q not found in status", name)
+	}
+
+	return pool, nil
+}
+
 func (z *zpool) SetProperty(ctx context.Context, name, property, value string) error {
 	names, err := z.GetPoolNames(ctx)
 	if err != nil {
@@ -484,24 +502,19 @@ func (z *zpool) IsDeviceInZpool(ctx context.Context, devicePath string) (bool, s
 			return false, "", fmt.Errorf("failed to get status for pool %q: %w", p.Name, err)
 		}
 
-		poolStatus, ok := status.Pools[p.Name]
-		if !ok {
-			continue
-		}
-
-		if v := findVdevByPathInMap(poolStatus.Vdevs, devicePath); v != nil {
+		if v := findVdevByPathInMap(status.Vdevs, devicePath); v != nil {
 			return true, p.Name, nil
 		}
 
-		if v := findVdevByPathInMap(poolStatus.Logs, devicePath); v != nil {
+		if v := findVdevByPathInMap(status.Logs, devicePath); v != nil {
 			return true, p.Name, nil
 		}
 
-		if v := findVdevByPathInMap(poolStatus.Spares, devicePath); v != nil {
+		if v := findVdevByPathInMap(status.Spares, devicePath); v != nil {
 			return true, p.Name, nil
 		}
 
-		if v := findVdevByPathInMap(poolStatus.L2Cache, devicePath); v != nil {
+		if v := findVdevByPathInMap(status.L2Cache, devicePath); v != nil {
 			return true, p.Name, nil
 		}
 	}
@@ -550,21 +563,12 @@ func (p *ZPool) Scrub(ctx context.Context) error {
 	return nil
 }
 
-func (p *ZPool) Status(ctx context.Context) (*ZPoolStatus, error) {
+func (p *ZPool) Status(ctx context.Context) (*ZPoolStatusPool, error) {
 	if p.z == nil {
 		return nil, fmt.Errorf("no zpool client attached")
 	}
 
-	var resp ZPoolStatus
-
-	args := append([]string{"status"}, zpoolArgs...)
-	args = append(args, p.Name, "-P", "-v")
-
-	if err := p.z.cmd.RunJSON(ctx, &resp, args...); err != nil {
-		return nil, err
-	}
-
-	return &resp, nil
+	return p.z.GetPoolStatus(ctx, p.Name)
 }
 
 func (p *ZPool) AddSpare(ctx context.Context, device string, force bool) error {
@@ -674,14 +678,9 @@ func (p *ZPool) RequiredSpareSize(ctx context.Context) (uint64, error) {
 		return 0, fmt.Errorf("failed to get pool status: %w", err)
 	}
 
-	poolStatus, ok := status.Pools[p.Name]
-	if !ok {
-		return 0, fmt.Errorf("pool %q not found in status", p.Name)
-	}
-
 	var maxSize uint64
 
-	for _, v := range poolStatus.Vdevs {
+	for _, v := range status.Vdevs {
 		size := maxRepDevSize(v)
 		if size > maxSize {
 			maxSize = size

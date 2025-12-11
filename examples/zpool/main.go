@@ -52,7 +52,7 @@ func main() {
 			log.Fatalf("zpool status error for pool %q: %v", poolName, err)
 		}
 
-		fmt.Printf("  Status State: %s\n", status.Pools[pool.Name].State)
+		fmt.Printf("  Status State: %s\n", status.State)
 	} else {
 		pools, err = client.Zpool.List(ctx)
 		if err != nil {
@@ -71,7 +71,7 @@ func main() {
 			if err != nil {
 				log.Fatalf("zpool status error for pool %q: %v", pool.Name, err)
 			}
-			fmt.Printf("  Status State: %s\n", status.Pools[pool.Name].State)
+			fmt.Printf("  Status State: %s\n", status.State)
 
 			datasets, err := pool.Datasets(ctx, gzfs.DatasetTypeAll)
 			if err != nil {
