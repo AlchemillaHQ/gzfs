@@ -60,6 +60,16 @@ func toZfsType(t DatasetType) string {
 	}
 }
 
+func (z *zfs) hydrateDataset(d *Dataset) {
+	d.z = z
+	d.GUID = ParseString(d.Properties["guid"].Value)
+	d.Mountpoint = ParseString(d.Properties["mountpoint"].Value)
+	d.Used = ParseSize(d.Properties["used"].Value)
+	d.Available = ParseSize(d.Properties["available"].Value)
+	d.Referenced = ParseSize(d.Properties["referenced"].Value)
+	d.Compressratio = ParseRatio(d.Properties["compressratio"].Value)
+}
+
 func (z *zfs) listArgs(name string, recursive bool, t *DatasetType) []string {
 	args := append(
 		[]string{"list", "-o", strings.Join(dsPropList, ",")},
@@ -97,15 +107,7 @@ func (z *zfs) List(ctx context.Context, recursive bool, name ...string) ([]*Data
 
 	datasets := make([]*Dataset, 0, len(resp.Datasets))
 	for _, d := range resp.Datasets {
-		d.z = z
-
-		d.GUID = ParseString(d.Properties["guid"].Value)
-		d.Mountpoint = ParseString(d.Properties["mountpoint"].Value)
-		d.Used = ParseSize(d.Properties["used"].Value)
-		d.Available = ParseSize(d.Properties["available"].Value)
-		d.Referenced = ParseSize(d.Properties["referenced"].Value)
-		d.Compressratio = ParseRatio(d.Properties["compressratio"].Value)
-
+		z.hydrateDataset(d)
 		datasets = append(datasets, d)
 	}
 
@@ -137,15 +139,7 @@ func (z *zfs) ListWithPrefix(ctx context.Context, t DatasetType, prefix string, 
 	datasets := make([]*Dataset, 0, len(resp.Datasets))
 	for _, d := range resp.Datasets {
 		if prefix == "" || strings.HasPrefix(d.Name, prefix) {
-			d.z = z
-
-			d.GUID = ParseString(d.Properties["guid"].Value)
-			d.Mountpoint = ParseString(d.Properties["mountpoint"].Value)
-			d.Used = ParseSize(d.Properties["used"].Value)
-			d.Available = ParseSize(d.Properties["available"].Value)
-			d.Referenced = ParseSize(d.Properties["referenced"].Value)
-			d.Compressratio = ParseRatio(d.Properties["compressratio"].Value)
-
+			z.hydrateDataset(d)
 			datasets = append(datasets, d)
 		}
 	}
@@ -168,12 +162,8 @@ func (z *zfs) Get(ctx context.Context, name string, recursive bool) (*Dataset, e
 	}
 
 	dataset.z = z
-	dataset.GUID = ParseString(dataset.Properties["guid"].Value)
-	dataset.Mountpoint = ParseString(dataset.Properties["mountpoint"].Value)
-	dataset.Used = ParseSize(dataset.Properties["used"].Value)
-	dataset.Available = ParseSize(dataset.Properties["available"].Value)
-	dataset.Referenced = ParseSize(dataset.Properties["referenced"].Value)
-	dataset.Compressratio = ParseRatio(dataset.Properties["compressratio"].Value)
+
+	z.hydrateDataset(dataset)
 
 	return dataset, nil
 }
@@ -249,7 +239,7 @@ func (z *zfs) ListByType(ctx context.Context, t DatasetType, recursive bool, nam
 
 	datasets := make([]*Dataset, 0, len(resp.Datasets))
 	for _, d := range resp.Datasets {
-		d.z = z
+		z.hydrateDataset(d)
 		datasets = append(datasets, d)
 	}
 
