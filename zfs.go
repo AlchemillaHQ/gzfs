@@ -55,6 +55,8 @@ func toZfsType(t DatasetType) string {
 		return "volume"
 	case DatasetTypeSnapshot:
 		return "snapshot"
+	case DatasetTypeAll:
+		return ""
 	default:
 		return string(t)
 	}
@@ -80,7 +82,7 @@ func (z *zfs) listArgs(name string, recursive bool, t *DatasetType) []string {
 		args = append(args, "-r")
 	}
 
-	if t != nil {
+	if t != nil && *t != DatasetTypeAll && *t != "" {
 		args = append(args, "-t", toZfsType(*t))
 	}
 
