@@ -50,11 +50,11 @@ type DatasetList struct {
 func toZfsType(t DatasetType) string {
 	switch t {
 	case DatasetTypeFilesystem:
-		return "filesystem"
+		return "fs"
 	case DatasetTypeVolume:
-		return "volume"
+		return "vol"
 	case DatasetTypeSnapshot:
-		return "snapshot"
+		return "snap"
 	case DatasetTypeAll:
 		return ""
 	default:
