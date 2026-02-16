@@ -846,3 +846,162 @@ func (d *Dataset) SendToDataset(ctx context.Context, dest string, force bool) (*
 
 	return d.z.SendToDataset(ctx, d.Name, dest, force)
 }
+
+func (z *zfs) ensureSnapshot(ctx context.Context, snapshot, label string) error {
+	if snapshot == "" {
+		return fmt.Errorf("%s snapshot name is empty", label)
+	}
+
+	ds, err := z.Get(ctx, snapshot, false)
+	if err != nil {
+		return fmt.Errorf("error_getting_%s_snapshot: %w", label, err)
+	}
+	if ds == nil {
+		return fmt.Errorf("%s_snapshot_not_found: %s", label, snapshot)
+	}
+	if ds.Type != DatasetTypeSnapshot {
+		return fmt.Errorf("can_only_send_from_snapshots")
+	}
+
+	return nil
+}
+
+func (z *zfs) SendSnapshot(ctx context.Context, snapshot string, out io.Writer) error {
+	if z == nil {
+		return fmt.Errorf("zfs client is nil")
+	}
+	if out == nil {
+		return fmt.Errorf("output writer is nil")
+	}
+	if err := z.ensureSnapshot(ctx, snapshot, "source"); err != nil {
+		return err
+	}
+
+	var stderr bytes.Buffer
+	if err := z.cmd.RunStream(ctx, nil, out, &stderr, "send", snapshot); err != nil {
+		return fmt.Errorf("send_failed: %w", err)
+	}
+	return nil
+}
+
+func (z *zfs) SendIncremental(ctx context.Context, baseSnapshot, targetSnapshot string, out io.Writer) error {
+	if z == nil {
+		return fmt.Errorf("zfs client is nil")
+	}
+	if out == nil {
+		return fmt.Errorf("output writer is nil")
+	}
+	if err := z.ensureSnapshot(ctx, baseSnapshot, "base"); err != nil {
+		return err
+	}
+	if err := z.ensureSnapshot(ctx, targetSnapshot, "target"); err != nil {
+		return err
+	}
+
+	baseDataset, _, _ := strings.Cut(baseSnapshot, "@")
+	targetDataset, _, _ := strings.Cut(targetSnapshot, "@")
+	if baseDataset != targetDataset {
+		return fmt.Errorf("incremental_snapshots_must_be_same_dataset")
+	}
+
+	var stderr bytes.Buffer
+	if err := z.cmd.RunStream(ctx, nil, out, &stderr, "send", "-i", baseSnapshot, targetSnapshot); err != nil {
+		return fmt.Errorf("send_failed: %w", err)
+	}
+
+	return nil
+}
+
+func (z *zfs) SendIncrementalWithIntermediates(ctx context.Context, baseSnapshot, targetSnapshot string, out io.Writer) error {
+	if z == nil {
+		return fmt.Errorf("zfs client is nil")
+	}
+	if out == nil {
+		return fmt.Errorf("output writer is nil")
+	}
+	if err := z.ensureSnapshot(ctx, baseSnapshot, "base"); err != nil {
+		return err
+	}
+	if err := z.ensureSnapshot(ctx, targetSnapshot, "target"); err != nil {
+		return err
+	}
+
+	baseDataset, _, _ := strings.Cut(baseSnapshot, "@")
+	targetDataset, _, _ := strings.Cut(targetSnapshot, "@")
+	if baseDataset != targetDataset {
+		return fmt.Errorf("incremental_snapshots_must_be_same_dataset")
+	}
+
+	var stderr bytes.Buffer
+	if err := z.cmd.RunStream(ctx, nil, out, &stderr, "send", "-I", baseSnapshot, targetSnapshot); err != nil {
+		return fmt.Errorf("send_failed: %w", err)
+	}
+
+	return nil
+}
+
+func (z *zfs) ReceiveStream(ctx context.Context, in io.Reader, dest string, force bool) error {
+	if z == nil {
+		return fmt.Errorf("zfs client is nil")
+	}
+	if in == nil {
+		return fmt.Errorf("input reader is nil")
+	}
+	if dest == "" {
+		return fmt.Errorf("destination name is empty")
+	}
+
+	args := []string{"recv"}
+	if force {
+		args = append(args, "-F")
+	}
+	args = append(args, dest)
+
+	var stderr bytes.Buffer
+	if err := z.cmd.RunStream(ctx, in, nil, &stderr, args...); err != nil {
+		return fmt.Errorf("recv_failed: %w", err)
+	}
+	return nil
+}
+
+func (d *Dataset) SendSnapshot(ctx context.Context, out io.Writer) error {
+	if d == nil {
+		return fmt.Errorf("dataset is nil")
+	}
+	if d.z == nil {
+		return fmt.Errorf("no zfs client attached")
+	}
+	if d.Type != DatasetTypeSnapshot {
+		return fmt.Errorf("can_only_send_from_snapshots")
+	}
+
+	return d.z.SendSnapshot(ctx, d.Name, out)
+}
+
+func (d *Dataset) SendIncremental(ctx context.Context, baseSnapshot string, out io.Writer) error {
+	if d == nil {
+		return fmt.Errorf("dataset is nil")
+	}
+	if d.z == nil {
+		return fmt.Errorf("no zfs client attached")
+	}
+	if d.Type != DatasetTypeSnapshot {
+		return fmt.Errorf("can_only_send_from_snapshots")
+	}
+
+	return d.z.SendIncremental(ctx, baseSnapshot, d.Name, out)
+}
+
+func (d *Dataset) SendIncrementalWithIntermediates(ctx context.Context, baseSnapshot string, out io.Writer) error {
+	if d == nil {
+		return fmt.Errorf("dataset is nil")
+	}
+	if d.z == nil {
+		return fmt.Errorf("no zfs client attached")
+	}
+	if d.Type != DatasetTypeSnapshot {
+		return fmt.Errorf("can_only_send_from_snapshots")
+	}
+
+	return d.z.SendIncrementalWithIntermediates(ctx, baseSnapshot, d.Name, out)
+}

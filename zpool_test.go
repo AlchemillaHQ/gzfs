@@ -42,7 +42,7 @@ func TestZpool_List(t *testing.T) {
 			if tt.expectError {
 				// Don't add a mock response to trigger error
 			} else {
-				expectedCmd := "zpool list -o all -p -P -j"
+				expectedCmd := "zpool list -o all -v -p -P -j"
 				mockRunner.AddCommand(expectedCmd, tt.mockJSON, "", nil)
 			}
 
@@ -116,7 +116,7 @@ func TestZpool_Get(t *testing.T) {
 			}
 
 			if !tt.expectError {
-				expectedCmd := "zpool list -o all -p " + tt.poolName + " -P -j"
+				expectedCmd := "zpool list -o all -v -p " + tt.poolName + " -P -j"
 				mockRunner.AddCommand(expectedCmd, tt.mockJSON, "", nil)
 			}
 

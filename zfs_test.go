@@ -2,6 +2,7 @@ package gzfs
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/alchemillahq/gzfs/testutil"
@@ -58,7 +59,7 @@ func TestZFS_List(t *testing.T) {
 				// Don't add a mock response to trigger error
 			} else {
 				// Add expected command with JSON response
-				expectedCmd := "zfs list -o all -p"
+				expectedCmd := "zfs list -o " + strings.Join(dsPropList, ",") + " -p"
 				if tt.recursive {
 					expectedCmd += " -r"
 				}
@@ -149,7 +150,7 @@ func TestZFS_Get(t *testing.T) {
 			}
 
 			if !tt.expectError {
-				expectedCmd := "zfs list -o all -p"
+				expectedCmd := "zfs list -o " + strings.Join(dsPropList, ",") + " -p"
 				if tt.recursive {
 					expectedCmd += " -r"
 				}
