@@ -392,8 +392,13 @@ func (z *zfs) EditFilesystem(ctx context.Context, name string, props map[string]
 
 	delete(clean, "encryptionKey")
 
-	if q, ok := clean["quota"]; ok && (q == "" || q == "0B") {
-		delete(clean, "quota")
+	if q, ok := clean["quota"]; ok {
+		switch q {
+		case "":
+			delete(clean, "quota")
+		case "0B", "0":
+			clean["quota"] = "none"
+		}
 	}
 
 	if len(clean) == 0 {
