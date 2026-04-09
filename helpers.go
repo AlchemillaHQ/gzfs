@@ -32,7 +32,8 @@ var (
 		"compression", "type", "volsize", "quota", "referenced", "written",
 		"logicalused", "usedbydataset", "guid", "mounted", "checksum",
 		"aclmode", "aclinherit", "primarycache", "volmode", "compressratio",
-		"atime", "dedup", "volblocksize",
+		"atime", "dedup", "volblocksize", "encryption", "encryptionroot",
+		"keyformat", "keylocation",
 	}
 )
 
