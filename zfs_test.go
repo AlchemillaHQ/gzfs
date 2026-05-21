@@ -359,6 +359,7 @@ func TestDataset_LoadKeyWithPassphrase(t *testing.T) {
 		name        string
 		dataset     *Dataset
 		passphrase  string
+		recursive   bool
 		mockError   bool
 		expectError bool
 	}{
@@ -370,6 +371,18 @@ func TestDataset_LoadKeyWithPassphrase(t *testing.T) {
 				Type: DatasetTypeFilesystem,
 			},
 			passphrase:  "test-passphrase-for-encryption-32bytes",
+			recursive:   false,
+			expectError: false,
+		},
+		{
+			name: "success recursive",
+			dataset: &Dataset{
+				z:    &zfs{cmd: Cmd{Bin: "zfs"}},
+				Name: "tank/enc",
+				Type: DatasetTypeFilesystem,
+			},
+			passphrase:  "test-passphrase-for-encryption-32bytes",
+			recursive:   true,
 			expectError: false,
 		},
 		{
@@ -413,7 +426,11 @@ func TestDataset_LoadKeyWithPassphrase(t *testing.T) {
 			if tt.dataset != nil && tt.dataset.z != nil {
 				tt.dataset.z.cmd.Runner = mockRunner
 
-				expectedCmd := "zfs load-key -L prompt " + tt.dataset.Name
+				expectedCmd := "zfs load-key -L prompt"
+				if tt.recursive {
+					expectedCmd += " -r"
+				}
+				expectedCmd += " " + tt.dataset.Name
 				if tt.mockError {
 					mockRunner.AddCommand(expectedCmd, "", "load-key error", fmt.Errorf("exit status 1"))
 				} else {
@@ -421,7 +438,7 @@ func TestDataset_LoadKeyWithPassphrase(t *testing.T) {
 				}
 			}
 
-			err := tt.dataset.LoadKeyWithPassphrase(ctx, tt.passphrase)
+			err := tt.dataset.LoadKeyWithPassphrase(ctx, tt.passphrase, tt.recursive)
 
 			if tt.expectError && err == nil {
 				t.Error("Expected error but got nil")
@@ -435,7 +452,11 @@ func TestDataset_LoadKeyWithPassphrase(t *testing.T) {
 				if lastCall == nil {
 					t.Fatal("No command was executed")
 				}
-				expectedCmd := "zfs load-key -L prompt " + tt.dataset.Name
+				expectedCmd := "zfs load-key -L prompt"
+				if tt.recursive {
+					expectedCmd += " -r"
+				}
+				expectedCmd += " " + tt.dataset.Name
 				if lastCall.Cmd != expectedCmd {
 					t.Errorf("Expected command %q, got %q", expectedCmd, lastCall.Cmd)
 				}

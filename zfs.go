@@ -874,7 +874,7 @@ func (d *Dataset) LoadKey(ctx context.Context, recursive bool) error {
 	return nil
 }
 
-func (d *Dataset) LoadKeyWithPassphrase(ctx context.Context, passphrase string) error {
+func (d *Dataset) LoadKeyWithPassphrase(ctx context.Context, passphrase string, recursive bool) error {
 	if d == nil {
 		return fmt.Errorf("dataset is nil")
 	}
@@ -885,8 +885,14 @@ func (d *Dataset) LoadKeyWithPassphrase(ctx context.Context, passphrase string) 
 		return fmt.Errorf("cannot load key for snapshots")
 	}
 
+	args := []string{"load-key", "-L", "prompt"}
+	if recursive {
+		args = append(args, "-r")
+	}
+	args = append(args, d.Name)
+
 	stdin := strings.NewReader(passphrase)
-	_, _, err := d.z.cmd.RunBytes(ctx, stdin, "load-key", "-L", "prompt", d.Name)
+	_, _, err := d.z.cmd.RunBytes(ctx, stdin, args...)
 	if err != nil {
 		return fmt.Errorf("load_key_with_passphrase_failed: %w", err)
 	}
