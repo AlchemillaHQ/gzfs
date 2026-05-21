@@ -269,10 +269,6 @@ func prepareEncryptionKey(name string, props map[string]string) error {
 	seed := fmt.Sprintf("%s-%s", name, key)
 	keyPath := fmt.Sprintf("/etc/zfs/keys/%s", GenerateDeterministicUUID(seed))
 
-	if _, err := os.Stat(keyPath); err == nil {
-		return fmt.Errorf("dont_reuse_encryption_keys")
-	}
-
 	if err := os.WriteFile(keyPath, []byte(key), 0600); err != nil {
 		return fmt.Errorf("failed_to_write_encryption_key")
 	}
