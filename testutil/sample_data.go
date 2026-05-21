@@ -165,6 +165,154 @@ const ZPoolListJSON = `{
   }
 }`
 
+const ZFSEncryptedListJSON = `{
+  "output_version": {
+    "command": "zfs list",
+    "vers_major": 0,
+    "vers_minor": 1
+  },
+  "datasets": {
+    "tank/enc": {
+      "name": "tank/enc",
+      "type": "FILESYSTEM",
+      "pool": "tank",
+      "createtxg": "10",
+      "properties": {
+        "guid": {
+          "value": "1111222233334444555",
+          "source": {
+            "type": "NONE",
+            "data": "-"
+          }
+        },
+        "type": {
+          "value": "filesystem",
+          "source": {
+            "type": "NONE",
+            "data": "-"
+          }
+        },
+        "encryption": {
+          "value": "aes-256-gcm",
+          "source": {
+            "type": "LOCAL",
+            "data": "-"
+          }
+        },
+        "encryptionroot": {
+          "value": "tank/enc",
+          "source": {
+            "type": "LOCAL",
+            "data": "-"
+          }
+        },
+        "keyformat": {
+          "value": "passphrase",
+          "source": {
+            "type": "LOCAL",
+            "data": "-"
+          }
+        },
+        "keylocation": {
+          "value": "file:///etc/zfs/keys/abc-def-ghijkl",
+          "source": {
+            "type": "LOCAL",
+            "data": "-"
+          }
+        },
+        "used": {
+          "value": "1024000",
+          "source": {
+            "type": "NONE",
+            "data": "-"
+          }
+        },
+        "available": {
+          "value": "1024000000",
+          "source": {
+            "type": "NONE",
+            "data": "-"
+          }
+        },
+        "referenced": {
+          "value": "512000",
+          "source": {
+            "type": "NONE",
+            "data": "-"
+          }
+        },
+        "mountpoint": {
+          "value": "/tank/enc",
+          "source": {
+            "type": "DEFAULT",
+            "data": "-"
+          }
+        },
+        "mounted": {
+          "value": "yes",
+          "source": {
+            "type": "NONE",
+            "data": "-"
+          }
+        }
+      }
+    }
+  }
+}`
+
+const ZFSGetEncryptionJSON = `{
+  "output_version": {
+    "command": "zfs get",
+    "vers_major": 0,
+    "vers_minor": 1
+  },
+  "datasets": {
+    "tank/enc": {
+      "name": "tank/enc",
+      "type": "FILESYSTEM",
+      "pool": "tank",
+      "createtxg": "10",
+      "properties": {
+        "encryption": {
+          "value": "aes-256-gcm",
+          "source": {
+            "type": "LOCAL",
+            "data": "-"
+          }
+        },
+        "keylocation": {
+          "value": "file:///etc/zfs/keys/abc-def-ghijkl",
+          "source": {
+            "type": "LOCAL",
+            "data": "-"
+          }
+        },
+        "keyformat": {
+          "value": "passphrase",
+          "source": {
+            "type": "LOCAL",
+            "data": "-"
+          }
+        },
+        "keystatus": {
+          "value": "available",
+          "source": {
+            "type": "NONE",
+            "data": "-"
+          }
+        },
+        "encryptionroot": {
+          "value": "tank/enc",
+          "source": {
+            "type": "LOCAL",
+            "data": "-"
+          }
+        }
+      }
+    }
+  }
+}`
+
 const ZDBOutput = `version: 5000
 name: tank
 	type: root

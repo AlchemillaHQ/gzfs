@@ -42,6 +42,14 @@ type Dataset struct {
 	Properties map[string]ZFSProperty `json:"properties"`
 }
 
+type EncryptionProperties struct {
+	Encryption     string `json:"encryption"`
+	KeyLocation    string `json:"keylocation"`
+	KeyFormat      string `json:"keyformat"`
+	KeyStatus      string `json:"keystatus"`
+	EncryptionRoot string `json:"encryptionroot"`
+}
+
 type DatasetList struct {
 	OutputVersion OutputVersion       `json:"output_version"`
 	Datasets      map[string]*Dataset `json:"datasets"`
@@ -248,32 +256,41 @@ func (z *zfs) ListByType(ctx context.Context, t DatasetType, recursive bool, nam
 	return datasets, nil
 }
 
+func prepareEncryptionKey(name string, props map[string]string) error {
+	key, ok := props["encryptionKey"]
+	if !ok || key == "" || props["encryption"] == "off" {
+		return nil
+	}
+
+	if len([]byte(key)) < 32 || len([]byte(key)) > 512 {
+		return fmt.Errorf("invalid_encryption_key_length")
+	}
+
+	seed := fmt.Sprintf("%s-%s", name, key)
+	keyPath := fmt.Sprintf("/etc/zfs/keys/%s", GenerateDeterministicUUID(seed))
+
+	if _, err := os.Stat(keyPath); err == nil {
+		return fmt.Errorf("dont_reuse_encryption_keys")
+	}
+
+	if err := os.WriteFile(keyPath, []byte(key), 0600); err != nil {
+		return fmt.Errorf("failed_to_write_encryption_key")
+	}
+
+	props["keylocation"] = fmt.Sprintf("file://%s", keyPath)
+	props["keyformat"] = "passphrase"
+
+	return nil
+}
+
 func (z *zfs) CreateVolume(ctx context.Context, name string, size uint64, properties map[string]string) (*Dataset, error) {
 	props := make(map[string]string, len(properties))
 	maps.Copy(props, properties)
 
 	args := []string{"create", "-p", "-V", strconv.FormatUint(size, 10)}
 
-	if key, ok := props["encryptionKey"]; ok {
-		if key != "" && props["encryption"] != "off" {
-			if len([]byte(key)) < 32 || len([]byte(key)) > 512 {
-				return nil, fmt.Errorf("invalid_encryption_key_length")
-			}
-
-			seed := fmt.Sprintf("%s-%s", name, key)
-			randomFile := fmt.Sprintf("/etc/zfs/keys/%s", GenerateDeterministicUUID(seed))
-
-			if _, err := os.Stat(randomFile); err == nil {
-				return nil, fmt.Errorf("dont_reuse_encryption_keys")
-			}
-
-			if err := os.WriteFile(randomFile, []byte(key), 0600); err != nil {
-				return nil, fmt.Errorf("failed_to_write_encryption_key")
-			}
-
-			props["keylocation"] = fmt.Sprintf("file://%s", randomFile)
-			props["keyformat"] = "passphrase"
-		}
+	if err := prepareEncryptionKey(name, props); err != nil {
+		return nil, err
 	}
 
 	delete(props, "encryptionKey")
@@ -330,26 +347,8 @@ func (z *zfs) CreateFilesystem(ctx context.Context, name string, properties map[
 
 	args := []string{"create"}
 
-	if key, ok := props["encryptionKey"]; ok {
-		if key != "" && props["encryption"] != "off" {
-			if len([]byte(key)) < 32 || len([]byte(key)) > 512 {
-				return nil, fmt.Errorf("invalid_encryption_key_length")
-			}
-
-			seed := fmt.Sprintf("%s-%s", name, key)
-			randomFile := fmt.Sprintf("/etc/zfs/keys/%s", GenerateDeterministicUUID(seed))
-
-			if _, err := os.Stat(randomFile); err == nil {
-				return nil, fmt.Errorf("dont_reuse_encryption_keys")
-			}
-
-			if err := os.WriteFile(randomFile, []byte(key), 0600); err != nil {
-				return nil, fmt.Errorf("failed_to_write_encryption_key")
-			}
-
-			props["keylocation"] = fmt.Sprintf("file://%s", randomFile)
-			props["keyformat"] = "passphrase"
-		}
+	if err := prepareEncryptionKey(name, props); err != nil {
+		return nil, err
 	}
 
 	delete(props, "encryptionKey")
@@ -808,6 +807,156 @@ func (d *Dataset) Mount(ctx context.Context, overlay bool, options ...string) er
 	return nil
 }
 
+func (d *Dataset) IsEncrypted() bool {
+	if d == nil || d.Properties == nil {
+		return false
+	}
+	prop, ok := d.Properties["encryption"]
+	if !ok {
+		return false
+	}
+	v := strings.TrimSpace(prop.Value)
+	return v != "" && v != "off"
+}
+
+func (d *Dataset) MountWithKey(ctx context.Context, overlay bool, options ...string) error {
+	if d == nil {
+		return fmt.Errorf("dataset is nil")
+	}
+	if d.z == nil {
+		return fmt.Errorf("no zfs client attached")
+	}
+	if d.Type == DatasetTypeSnapshot {
+		return fmt.Errorf("cannot mount snapshots")
+	}
+
+	args := []string{"mount", "-l"}
+	if overlay {
+		args = append(args, "-O")
+	}
+
+	if len(options) > 0 {
+		args = append(args, "-o", strings.Join(options, ","))
+	}
+
+	args = append(args, d.Name)
+
+	_, _, err := d.z.cmd.RunBytes(ctx, nil, args...)
+	if err != nil {
+		return fmt.Errorf("mount_with_key_failed: %w", err)
+	}
+
+	return nil
+}
+
+func (d *Dataset) LoadKey(ctx context.Context, recursive bool) error {
+	if d == nil {
+		return fmt.Errorf("dataset is nil")
+	}
+	if d.z == nil {
+		return fmt.Errorf("no zfs client attached")
+	}
+	if d.Type == DatasetTypeSnapshot {
+		return fmt.Errorf("cannot load key for snapshots")
+	}
+
+	args := []string{"load-key"}
+	if recursive {
+		args = append(args, "-r")
+	}
+	args = append(args, d.Name)
+
+	_, _, err := d.z.cmd.RunBytes(ctx, nil, args...)
+	if err != nil {
+		return fmt.Errorf("load_key_failed: %w", err)
+	}
+
+	return nil
+}
+
+func (d *Dataset) LoadKeyWithPassphrase(ctx context.Context, passphrase string) error {
+	if d == nil {
+		return fmt.Errorf("dataset is nil")
+	}
+	if d.z == nil {
+		return fmt.Errorf("no zfs client attached")
+	}
+	if d.Type == DatasetTypeSnapshot {
+		return fmt.Errorf("cannot load key for snapshots")
+	}
+
+	stdin := strings.NewReader(passphrase)
+	_, _, err := d.z.cmd.RunBytes(ctx, stdin, "load-key", "-L", "prompt", d.Name)
+	if err != nil {
+		return fmt.Errorf("load_key_with_passphrase_failed: %w", err)
+	}
+
+	return nil
+}
+
+func (d *Dataset) UnloadKey(ctx context.Context, recursive bool) error {
+	if d == nil {
+		return fmt.Errorf("dataset is nil")
+	}
+	if d.z == nil {
+		return fmt.Errorf("no zfs client attached")
+	}
+	if d.Type == DatasetTypeSnapshot {
+		return fmt.Errorf("cannot unload key for snapshots")
+	}
+
+	args := []string{"unload-key"}
+	if recursive {
+		args = append(args, "-r")
+	}
+	args = append(args, d.Name)
+
+	_, _, err := d.z.cmd.RunBytes(ctx, nil, args...)
+	if err != nil {
+		return fmt.Errorf("unload_key_failed: %w", err)
+	}
+
+	return nil
+}
+
+func (d *Dataset) GetEncryptionProperties(ctx context.Context) (*EncryptionProperties, error) {
+	if d == nil {
+		return nil, fmt.Errorf("dataset is nil")
+	}
+	if d.z == nil {
+		return nil, fmt.Errorf("no zfs client attached")
+	}
+
+	encProp, err := d.z.GetProperty(ctx, d.Name, "encryption")
+	if err != nil {
+		return nil, fmt.Errorf("get_encryption_property_failed: %w", err)
+	}
+	keylocProp, err := d.z.GetProperty(ctx, d.Name, "keylocation")
+	if err != nil {
+		return nil, fmt.Errorf("get_keylocation_property_failed: %w", err)
+	}
+	keyfmtProp, err := d.z.GetProperty(ctx, d.Name, "keyformat")
+	if err != nil {
+		return nil, fmt.Errorf("get_keyformat_property_failed: %w", err)
+	}
+	keystatProp, err := d.z.GetProperty(ctx, d.Name, "keystatus")
+	if err != nil {
+		return nil, fmt.Errorf("get_keystatus_property_failed: %w", err)
+	}
+	encrootProp, err := d.z.GetProperty(ctx, d.Name, "encryptionroot")
+	if err != nil {
+		return nil, fmt.Errorf("get_encryptionroot_property_failed: %w", err)
+	}
+
+	return &EncryptionProperties{
+		Encryption:     strings.TrimSpace(encProp.Value),
+		KeyLocation:    strings.TrimSpace(keylocProp.Value),
+		KeyFormat:      strings.TrimSpace(keyfmtProp.Value),
+		KeyStatus:      strings.TrimSpace(keystatProp.Value),
+		EncryptionRoot: strings.TrimSpace(encrootProp.Value),
+	}, nil
+}
+
 func (d *Dataset) Clone(ctx context.Context, dest string, properties map[string]string) (*Dataset, error) {
 	if d == nil {
 		return nil, fmt.Errorf("dataset is nil")
@@ -1009,4 +1158,42 @@ func (d *Dataset) SendIncrementalWithIntermediates(ctx context.Context, baseSnap
 	}
 
 	return d.z.SendIncrementalWithIntermediates(ctx, baseSnapshot, d.Name, out)
+}
+
+func (z *zfs) LoadKey(ctx context.Context, name string, recursive bool) error {
+	if name == "" {
+		return fmt.Errorf("dataset name is empty")
+	}
+
+	args := []string{"load-key"}
+	if recursive {
+		args = append(args, "-r")
+	}
+	args = append(args, name)
+
+	_, _, err := z.cmd.RunBytes(ctx, nil, args...)
+	if err != nil {
+		return fmt.Errorf("load_key_failed: %w", err)
+	}
+
+	return nil
+}
+
+func (z *zfs) UnloadKey(ctx context.Context, name string, recursive bool) error {
+	if name == "" {
+		return fmt.Errorf("dataset name is empty")
+	}
+
+	args := []string{"unload-key"}
+	if recursive {
+		args = append(args, "-r")
+	}
+	args = append(args, name)
+
+	_, _, err := z.cmd.RunBytes(ctx, nil, args...)
+	if err != nil {
+		return fmt.Errorf("unload_key_failed: %w", err)
+	}
+
+	return nil
 }
