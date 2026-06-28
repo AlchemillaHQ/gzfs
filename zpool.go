@@ -84,6 +84,8 @@ type ZPool struct {
 	Logs    map[string]*ZPoolVDEV `json:"logs"`
 	L2Cache map[string]*ZPoolVDEV `json:"l2cache"`
 	Spares  map[string]*ZPoolVDEV `json:"spares"`
+	Special map[string]*ZPoolVDEV `json:"special"`
+	Dedup   map[string]*ZPoolVDEV `json:"dedup"`
 }
 
 func (p *ZPool) MarshalJSON() ([]byte, error) {
@@ -118,6 +120,8 @@ func (p *ZPool) UnmarshalJSON(data []byte) error {
 	p.Logs = make(map[string]*ZPoolVDEV)
 	p.L2Cache = make(map[string]*ZPoolVDEV)
 	p.Spares = make(map[string]*ZPoolVDEV)
+	p.Special = make(map[string]*ZPoolVDEV)
+	p.Dedup = make(map[string]*ZPoolVDEV)
 
 	populateParsedFields := func(v *ZPoolVDEV) {
 		if v == nil || v.Properties == nil {
@@ -167,6 +171,14 @@ func (p *ZPool) UnmarshalJSON(data []byte) error {
 			}
 		case "spares":
 			if err := decodeGroup(raw, p.Spares); err != nil {
+				return fmt.Errorf("decode %s vdevs: %w", k, err)
+			}
+		case "special":
+			if err := decodeGroup(raw, p.Special); err != nil {
+				return fmt.Errorf("decode %s vdevs: %w", k, err)
+			}
+		case "dedup":
+			if err := decodeGroup(raw, p.Dedup); err != nil {
 				return fmt.Errorf("decode %s vdevs: %w", k, err)
 			}
 		default:
@@ -223,6 +235,8 @@ type ZPoolStatusPool struct {
 	Logs      map[string]*ZPoolStatusVDEV `json:"logs"`
 	Spares    map[string]*ZPoolStatusVDEV `json:"spares"`
 	L2Cache   map[string]*ZPoolStatusVDEV `json:"l2cache"`
+	Special   map[string]*ZPoolStatusVDEV `json:"special"`
+	Dedup     map[string]*ZPoolStatusVDEV `json:"dedup"`
 }
 
 type ZPoolStatus struct {
