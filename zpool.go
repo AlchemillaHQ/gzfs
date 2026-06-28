@@ -472,6 +472,11 @@ func (z *zpool) Create(ctx context.Context, name string, force bool, properties 
 	return err
 }
 
+func (z *zpool) Detach(ctx context.Context, poolName, device string) error {
+	_, _, err := z.cmd.RunBytes(ctx, nil, "detach", poolName, device)
+	return err
+}
+
 func findVdevByPath(v *ZPoolStatusVDEV, devicePath string) *ZPoolStatusVDEV {
 	if v == nil {
 		return nil
@@ -616,6 +621,22 @@ func (p *ZPool) RemoveSpare(ctx context.Context, device string) error {
 	_, _, err := p.z.cmd.RunBytes(ctx, nil, "remove", p.Name, device)
 	if err != nil {
 		return fmt.Errorf("pool_remove_spare_failed: %w", err)
+	}
+	return nil
+}
+
+func (p *ZPool) Detach(ctx context.Context, device string) error {
+	if device == "" {
+		return fmt.Errorf("device must not be empty")
+	}
+
+	if p.z == nil {
+		return fmt.Errorf("no zpool client attached")
+	}
+
+	_, _, err := p.z.cmd.RunBytes(ctx, nil, "detach", p.Name, device)
+	if err != nil {
+		return fmt.Errorf("pool_detach_failed: %w", err)
 	}
 	return nil
 }
