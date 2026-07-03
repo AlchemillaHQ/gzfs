@@ -324,6 +324,16 @@ func (z *zfs) EditVolume(ctx context.Context, name string, props map[string]stri
 		return fmt.Errorf("no_properties_to_edit")
 	}
 
+	if v, ok := props["readonly"]; ok && v == "off" {
+		if err := dataset.SetProperties(ctx, "readonly", "off"); err != nil {
+			return err
+		}
+		delete(props, "readonly")
+		if len(props) == 0 {
+			return nil
+		}
+	}
+
 	delete(props, "encryptionKey")
 
 	if _, ok := props["quota"]; ok {
@@ -389,6 +399,16 @@ func (z *zfs) EditFilesystem(ctx context.Context, name string, props map[string]
 
 	if len(props) == 0 {
 		return fmt.Errorf("no_properties_to_edit")
+	}
+
+	if v, ok := props["readonly"]; ok && v == "off" {
+		if err := ds.SetProperties(ctx, "readonly", "off"); err != nil {
+			return err
+		}
+		delete(props, "readonly")
+		if len(props) == 0 {
+			return nil
+		}
 	}
 
 	clean := make(map[string]string, len(props))
