@@ -283,7 +283,13 @@ func (z *zfs) CreateVolume(ctx context.Context, name string, size uint64, proper
 	props := make(map[string]string, len(properties))
 	maps.Copy(props, properties)
 
-	args := []string{"create", "-p", "-V", strconv.FormatUint(size, 10)}
+	args := []string{"create", "-p"}
+
+	if props["sparse"] == "on" {
+		args = append(args, "-s")
+	}
+
+	args = append(args, "-V", strconv.FormatUint(size, 10))
 
 	if err := prepareEncryptionKey(name, props); err != nil {
 		return nil, err
@@ -292,6 +298,7 @@ func (z *zfs) CreateVolume(ctx context.Context, name string, size uint64, proper
 	delete(props, "encryptionKey")
 	delete(props, "parent")
 	delete(props, "size")
+	delete(props, "sparse")
 
 	for k, v := range props {
 		args = append(args, "-o", fmt.Sprintf("%s=%s", k, v))
