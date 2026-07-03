@@ -33,7 +33,7 @@ var (
 		"logicalused", "usedbydataset", "guid", "mounted", "checksum",
 		"aclmode", "aclinherit", "primarycache", "volmode", "compressratio",
 		"atime", "dedup", "volblocksize", "encryption", "encryptionroot",
-		"keyformat", "keylocation", "refreservation",
+		"keyformat", "keylocation", "refreservation", "readonly",
 	}
 )
 

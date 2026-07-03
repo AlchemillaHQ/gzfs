@@ -304,6 +304,7 @@ func (z *zfs) CreateVolume(ctx context.Context, name string, size uint64, proper
 		args = append(args, "-o", fmt.Sprintf("%s=%s", k, v))
 	}
 
+	args = append(args, "-o", "readonly=off")
 	args = append(args, name)
 
 	if _, _, err := z.cmd.RunBytes(ctx, nil, args...); err != nil {
@@ -364,6 +365,7 @@ func (z *zfs) CreateFilesystem(ctx context.Context, name string, properties map[
 		args = append(args, "-o", fmt.Sprintf("%s=%s", k, v))
 	}
 
+	args = append(args, "-o", "readonly=off")
 	args = append(args, name)
 
 	if _, _, err := z.cmd.RunBytes(ctx, nil, args...); err != nil {
