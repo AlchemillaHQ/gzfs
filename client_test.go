@@ -228,6 +228,11 @@ func TestCmd_RunJSON(t *testing.T) {
 			expectError: true,
 		},
 		{
+			name:        "empty JSON",
+			mockJSON:    "",
+			expectError: true,
+		},
+		{
 			name:        "command error",
 			mockError:   fmt.Errorf("command failed"),
 			expectError: true,

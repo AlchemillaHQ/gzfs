@@ -90,10 +90,21 @@ func (c Cmd) RunBytes(ctx context.Context, stdin io.Reader, args ...string) ([]b
 }
 
 func (c Cmd) RunJSON(ctx context.Context, v any, args ...string) error {
+	return c.runJSON(ctx, v, false, args...)
+}
+
+func (c Cmd) runJSONAllowEmpty(ctx context.Context, v any, args ...string) error {
+	return c.runJSON(ctx, v, true, args...)
+}
+
+func (c Cmd) runJSON(ctx context.Context, v any, allowEmpty bool, args ...string) error {
 	args = append(args, "-j")
 	out, _, err := c.RunBytes(ctx, nil, args...)
 	if err != nil {
 		return err
+	}
+	if allowEmpty && len(bytes.TrimSpace(out)) == 0 {
+		return nil
 	}
 	if err := json.Unmarshal(out, v); err != nil {
 		return fmt.Errorf("failed to unmarshal JSON from %s: %w", c.Bin, err)

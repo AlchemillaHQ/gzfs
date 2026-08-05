@@ -364,7 +364,7 @@ func (z *zpool) GetPoolNames(ctx context.Context) ([]string, error) {
 	args := append([]string{"list", "-o", "name"}, zpoolArgs...)
 	args = append(args, "-P")
 
-	if err := z.cmd.RunJSON(ctx, &resp, args...); err != nil {
+	if err := z.cmd.runJSONAllowEmpty(ctx, &resp, args...); err != nil {
 		return nil, err
 	}
 

@@ -164,6 +164,12 @@ func TestZpool_GetPoolNames(t *testing.T) {
 			expected:    []string{"tank"},
 		},
 		{
+			name:        "no pools",
+			mockJSON:    "",
+			expectError: false,
+			expected:    []string{},
+		},
+		{
 			name:        "command error",
 			expectError: true,
 		},
