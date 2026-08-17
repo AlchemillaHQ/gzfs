@@ -213,12 +213,13 @@ func TestZpool_Create(t *testing.T) {
 	ctx := context.Background()
 
 	tests := []struct {
-		name        string
-		poolName    string
-		force       bool
-		properties  map[string]string
-		args        []string
-		expectError bool
+		name            string
+		poolName        string
+		force           bool
+		properties      map[string]string
+		args            []string
+		expectedCommand string
+		expectError     bool
 	}{
 		{
 			name:     "simple create",
@@ -227,16 +228,18 @@ func TestZpool_Create(t *testing.T) {
 			properties: map[string]string{
 				"ashift": "12",
 			},
-			args:        []string{"/dev/da0"},
-			expectError: false,
+			args:            []string{"/dev/da0"},
+			expectedCommand: "zpool create -o ashift=12 testpool /dev/da0",
+			expectError:     false,
 		},
 		{
-			name:        "create with force",
-			poolName:    "testpool",
-			force:       true,
-			properties:  map[string]string{},
-			args:        []string{"/dev/da0", "/dev/da1"},
-			expectError: false,
+			name:            "create with force",
+			poolName:        "testpool",
+			force:           true,
+			properties:      map[string]string{},
+			args:            []string{"/dev/da0", "/dev/da1"},
+			expectedCommand: "zpool create -f testpool /dev/da0 /dev/da1",
+			expectError:     false,
 		},
 		{
 			name:        "command error",
@@ -260,7 +263,7 @@ func TestZpool_Create(t *testing.T) {
 			}
 
 			if !tt.expectError {
-				mockRunner.AddCommand("zpool create", "", "", nil)
+				mockRunner.AddCommand(tt.expectedCommand, "", "", nil)
 			}
 
 			err := client.Create(ctx, tt.poolName, tt.force, tt.properties, tt.args...)
@@ -270,6 +273,84 @@ func TestZpool_Create(t *testing.T) {
 			}
 			if !tt.expectError && err != nil {
 				t.Errorf("Unexpected error: %v", err)
+			}
+
+			if !tt.expectError {
+				lastCall := mockRunner.GetLastCall()
+				if lastCall == nil {
+					t.Fatal("Expected zpool create command to be called")
+				}
+				if lastCall.Cmd != tt.expectedCommand {
+					t.Errorf("Expected command %q, got %q", tt.expectedCommand, lastCall.Cmd)
+				}
+			}
+		})
+	}
+}
+
+func TestZpool_CreateWithOptions(t *testing.T) {
+	ctx := context.Background()
+
+	tests := []struct {
+		name            string
+		options         ZPoolCreateOptions
+		args            []string
+		expectedCommand string
+	}{
+		{
+			name: "create with mountpoint",
+			options: ZPoolCreateOptions{
+				Mountpoint: "/mnt/testpool",
+			},
+			args:            []string{"/dev/da0"},
+			expectedCommand: "zpool create -m /mnt/testpool testpool /dev/da0",
+		},
+		{
+			name: "create with all options",
+			options: ZPoolCreateOptions{
+				Force:      true,
+				Mountpoint: "/mnt/testpool",
+				Properties: map[string]string{
+					"autotrim": "on",
+					"ashift":   "12",
+				},
+			},
+			args:            []string{"mirror", "/dev/da0", "/dev/da1"},
+			expectedCommand: "zpool create -f -m /mnt/testpool -o ashift=12 -o autotrim=on testpool mirror /dev/da0 /dev/da1",
+		},
+		{
+			name: "empty mountpoint is omitted",
+			options: ZPoolCreateOptions{
+				Mountpoint: "",
+			},
+			args:            []string{"/dev/da0"},
+			expectedCommand: "zpool create testpool /dev/da0",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockRunner := testutil.NewMockRunner()
+			mockRunner.AddCommand(tt.expectedCommand, "", "", nil)
+
+			client := &zpool{
+				cmd: Cmd{
+					Bin:    "zpool",
+					Runner: mockRunner,
+				},
+			}
+
+			err := client.CreateWithOptions(ctx, "testpool", tt.options, tt.args...)
+			if err != nil {
+				t.Fatalf("Unexpected error: %v", err)
+			}
+
+			lastCall := mockRunner.GetLastCall()
+			if lastCall == nil {
+				t.Fatal("Expected zpool create command to be called")
+			}
+			if lastCall.Cmd != tt.expectedCommand {
+				t.Errorf("Expected command %q, got %q", tt.expectedCommand, lastCall.Cmd)
 			}
 		})
 	}

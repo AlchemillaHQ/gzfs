@@ -4,12 +4,21 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 )
 
 type zpool struct {
 	cmd Cmd
 	zdb *zdb
 	zfs *zfs
+}
+
+// ZPoolCreateOptions configures creation of a ZFS pool.
+type ZPoolCreateOptions struct {
+	Force bool
+	// Mountpoint sets the pool's root dataset mountpoint. An empty value uses the ZFS default.
+	Mountpoint string
+	Properties map[string]string
 }
 
 type ZPoolState string
@@ -454,15 +463,33 @@ func (z *zpool) GetProperties(ctx context.Context, name string) (map[string]ZFSP
 }
 
 func (z *zpool) Create(ctx context.Context, name string, force bool, properties map[string]string, args ...string) error {
+	return z.CreateWithOptions(ctx, name, ZPoolCreateOptions{
+		Force:      force,
+		Properties: properties,
+	}, args...)
+}
+
+// CreateWithOptions creates a ZFS pool with the supplied options and vdev arguments.
+func (z *zpool) CreateWithOptions(ctx context.Context, name string, options ZPoolCreateOptions, args ...string) error {
 	cli := make([]string, 0, 8)
 	cli = append(cli, "create")
 
-	if force {
+	if options.Force {
 		cli = append(cli, "-f")
 	}
 
-	for prop, val := range properties {
-		cli = append(cli, "-o", fmt.Sprintf("%s=%s", prop, val))
+	if options.Mountpoint != "" {
+		cli = append(cli, "-m", options.Mountpoint)
+	}
+
+	properties := make([]string, 0, len(options.Properties))
+	for property := range options.Properties {
+		properties = append(properties, property)
+	}
+	sort.Strings(properties)
+
+	for _, property := range properties {
+		cli = append(cli, "-o", fmt.Sprintf("%s=%s", property, options.Properties[property]))
 	}
 
 	cli = append(cli, name)
