@@ -9,7 +9,7 @@ A Go library for interacting with ZFS (Zettabyte File System) on FreeBSD and oth
 ## Features
 
 - **Core ZFS Operations**: Create, list, get, snapshot, clone, destroy datasets and volumes
-- **ZPool Management**: Create, destroy, scrub pools, manage spares and cache devices
+- **ZPool Management**: Create, destroy (with optional force), export, and scrub pools; clear device labels; manage spares and cache devices
 - **ZDB Integration**: Low-level pool inspection with caching support
 - **Type Safety**: Strongly typed structs for all ZFS objects and properties
 - **Mock Testing**: Comprehensive test suite with mock runner for development

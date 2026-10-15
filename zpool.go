@@ -21,6 +21,12 @@ type ZPoolCreateOptions struct {
 	Properties map[string]string
 }
 
+// ZPoolDestroyOptions configures destruction of a ZFS pool.
+type ZPoolDestroyOptions struct {
+	// Force forcibly unmounts the pool's datasets before destroying it.
+	Force bool
+}
+
 type ZPoolState string
 
 const (
@@ -499,6 +505,36 @@ func (z *zpool) CreateWithOptions(ctx context.Context, name string, options ZPoo
 	return err
 }
 
+// Destroy destroys the named pool, optionally forcing its datasets to unmount.
+func (z *zpool) Destroy(ctx context.Context, name string, force bool) error {
+	args := []string{"destroy"}
+	if force {
+		args = append(args, "-f")
+	}
+	args = append(args, name)
+
+	_, _, err := z.cmd.RunBytes(ctx, nil, args...)
+	return err
+}
+
+func (z *zpool) Export(ctx context.Context, name string) error {
+	_, _, err := z.cmd.RunBytes(ctx, nil, "export", name)
+	return err
+}
+
+// LabelClear removes ZFS labels from a device that is not part of an active pool.
+// Errors, including those for devices without ZFS labels, are returned to the caller.
+func (z *zpool) LabelClear(ctx context.Context, device string, force bool) error {
+	args := []string{"labelclear"}
+	if force {
+		args = append(args, "-f")
+	}
+	args = append(args, device)
+
+	_, _, err := z.cmd.RunBytes(ctx, nil, args...)
+	return err
+}
+
 func (z *zpool) Detach(ctx context.Context, poolName, device string) error {
 	_, _, err := z.cmd.RunBytes(ctx, nil, "detach", poolName, device)
 	return err
@@ -587,13 +623,25 @@ func (p *ZPool) GetProperty(name string) (ZFSProperty, error) {
 	return prop, nil
 }
 
+// Destroy destroys the pool without forcing its datasets to unmount.
 func (p *ZPool) Destroy(ctx context.Context) error {
+	return p.DestroyWithOptions(ctx, ZPoolDestroyOptions{})
+}
+
+func (p *ZPool) DestroyWithOptions(ctx context.Context, options ZPoolDestroyOptions) error {
 	if p.z == nil {
 		return fmt.Errorf("no zpool client attached")
 	}
 
-	_, _, err := p.z.cmd.RunBytes(ctx, nil, "destroy", p.Name)
-	return err
+	return p.z.Destroy(ctx, p.Name, options.Force)
+}
+
+func (p *ZPool) Export(ctx context.Context) error {
+	if p.z == nil {
+		return fmt.Errorf("no zpool client attached")
+	}
+
+	return p.z.Export(ctx, p.Name)
 }
 
 func (p *ZPool) Scrub(ctx context.Context) error {

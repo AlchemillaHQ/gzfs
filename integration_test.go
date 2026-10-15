@@ -6,7 +6,10 @@ package gzfs_test
 import (
 	"context"
 	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
+	"time"
 
 	"github.com/alchemillahq/gzfs"
 )
@@ -65,6 +68,89 @@ func TestIntegration_ZPool_List(t *testing.T) {
 
 		t.Logf("ZDB Pool: %s, Version: %s, Children: %d",
 			zdbPool.Name, zdbPool.Version, len(zdbPool.Children))
+	}
+}
+
+func TestIntegration_ZPool_Lifecycle(t *testing.T) {
+	if os.Getenv("GZFS_INTEGRATION_TESTS") != "1" {
+		t.Skip("Integration tests disabled. Set GZFS_INTEGRATION_TESTS=1 to enable.")
+	}
+	if runtime.GOOS != "freebsd" {
+		t.Skip("Pool lifecycle integration test requires FreeBSD")
+	}
+	if os.Geteuid() != 0 {
+		t.Skip("Pool lifecycle integration test requires root privileges")
+	}
+
+	dir, err := os.MkdirTemp("", "gzfs-lifecycle-")
+	if err != nil {
+		t.Fatalf("Failed to create scratch directory: %v", err)
+	}
+	name := filepath.Base(dir)
+	device := filepath.Join(dir, "vdev")
+	client := gzfs.NewClient(gzfs.Options{})
+	cmd := gzfs.Cmd{Bin: "zpool"}
+	importPool := func(ctx context.Context) error {
+		_, _, err := cmd.RunBytes(ctx, nil, "import", "-d", dir, "-N", "-o", "cachefile=none", name)
+		return err
+	}
+	created, exported := false, false
+	t.Cleanup(func() {
+		if created {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+			defer cancel()
+			if exported {
+				if err := importPool(ctx); err != nil {
+					t.Errorf("Failed to import scratch pool during cleanup; retaining %s: %v", dir, err)
+					return
+				}
+			}
+			if err := client.Zpool.Destroy(ctx, name, true); err != nil {
+				t.Errorf("Failed to destroy scratch pool during cleanup; retaining %s: %v", dir, err)
+				return
+			}
+		}
+		if err := os.RemoveAll(dir); err != nil {
+			t.Errorf("Failed to remove scratch directory: %v", err)
+		}
+	})
+
+	file, err := os.Create(device)
+	if err != nil {
+		t.Fatalf("Failed to create file vdev: %v", err)
+	}
+	err = file.Truncate(128 << 20)
+	closeErr := file.Close()
+	if err != nil {
+		t.Fatalf("Failed to size file vdev: %v", err)
+	}
+	if closeErr != nil {
+		t.Fatalf("Failed to close file vdev: %v", closeErr)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	if err := client.Zpool.CreateWithOptions(ctx, name, gzfs.ZPoolCreateOptions{
+		Mountpoint: "none",
+		Properties: map[string]string{"cachefile": "none"},
+	}, device); err != nil {
+		t.Fatalf("Failed to create scratch pool: %v", err)
+	}
+	created = true
+	if err := client.Zpool.Export(ctx, name); err != nil {
+		t.Fatalf("Failed to export scratch pool: %v", err)
+	}
+	exported = true
+	if err := importPool(ctx); err != nil {
+		t.Fatalf("Failed to import scratch pool: %v", err)
+	}
+	exported = false
+	if err := client.Zpool.Destroy(ctx, name, true); err != nil {
+		t.Fatalf("Failed to force-destroy scratch pool: %v", err)
+	}
+	created = false
+	if err := client.Zpool.LabelClear(ctx, device, true); err != nil {
+		t.Fatalf("Failed to clear scratch vdev labels: %v", err)
 	}
 }
 

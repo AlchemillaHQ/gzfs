@@ -62,6 +62,17 @@ export GZFS_INTEGRATION_TESTS=1
 go test -tags=integration -v
 ```
 
+On FreeBSD, the pool lifecycle test also requires root privileges. It creates a
+temporary 128 MiB file vdev with no mountpoint or pool cache entry, then exercises
+create, export, import, forced destroy, and forced label clearing. It never uses
+an existing pool or disk. If pool cleanup fails, the scratch directory is retained
+and its path is reported.
+
+Run only this lifecycle test:
+```bash
+GZFS_INTEGRATION_TESTS=1 go test -tags=integration -run '^TestIntegration_ZPool_Lifecycle$' -v
+```
+
 Run integration benchmarks:
 ```bash
 export GZFS_INTEGRATION_TESTS=1

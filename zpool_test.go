@@ -2,6 +2,9 @@ package gzfs
 
 import (
 	"context"
+	"errors"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/alchemillahq/gzfs/testutil"
@@ -351,6 +354,176 @@ func TestZpool_CreateWithOptions(t *testing.T) {
 			}
 			if lastCall.Cmd != tt.expectedCommand {
 				t.Errorf("Expected command %q, got %q", tt.expectedCommand, lastCall.Cmd)
+			}
+		})
+	}
+}
+
+func TestZpool_LifecycleCommands(t *testing.T) {
+	ctx := context.Background()
+	tests := []struct {
+		name string
+		args []string
+		run  func(*zpool) error
+	}{
+		{
+			name: "pool destroy",
+			args: []string{"destroy", "tank"},
+			run: func(z *zpool) error {
+				return (&ZPool{Name: "tank", z: z}).Destroy(ctx)
+			},
+		},
+		{
+			name: "pool destroy with default options",
+			args: []string{"destroy", "tank"},
+			run: func(z *zpool) error {
+				return (&ZPool{Name: "tank", z: z}).DestroyWithOptions(ctx, ZPoolDestroyOptions{})
+			},
+		},
+		{
+			name: "pool destroy with force",
+			args: []string{"destroy", "-f", "tank"},
+			run: func(z *zpool) error {
+				return (&ZPool{Name: "tank", z: z}).DestroyWithOptions(ctx, ZPoolDestroyOptions{Force: true})
+			},
+		},
+		{
+			name: "client destroy",
+			args: []string{"destroy", "tank"},
+			run: func(z *zpool) error {
+				return z.Destroy(ctx, "tank", false)
+			},
+		},
+		{
+			name: "client destroy with force",
+			args: []string{"destroy", "-f", "tank"},
+			run: func(z *zpool) error {
+				return z.Destroy(ctx, "tank", true)
+			},
+		},
+		{
+			name: "pool export",
+			args: []string{"export", "tank"},
+			run: func(z *zpool) error {
+				return (&ZPool{Name: "tank", z: z}).Export(ctx)
+			},
+		},
+		{
+			name: "client export",
+			args: []string{"export", "tank"},
+			run: func(z *zpool) error {
+				return z.Export(ctx, "tank")
+			},
+		},
+		{
+			name: "labelclear",
+			args: []string{"labelclear", "/dev/ada0"},
+			run: func(z *zpool) error {
+				return z.LabelClear(ctx, "/dev/ada0", false)
+			},
+		},
+		{
+			name: "labelclear with force",
+			args: []string{"labelclear", "-f", "/dev/ada0"},
+			run: func(z *zpool) error {
+				return z.LabelClear(ctx, "/dev/ada0", true)
+			},
+		},
+	}
+	executions := []struct {
+		name    string
+		options Options
+	}{
+		{name: "default"},
+		{name: "custom binary", options: Options{ZpoolBin: "/custom/sbin/zpool"}},
+		{name: "sudo", options: Options{Sudo: true}},
+		{name: "sudo and custom binary", options: Options{Sudo: true, ZpoolBin: "/custom/sbin/zpool"}},
+	}
+	exitErr := errors.New("exit status 1")
+	results := []struct {
+		name   string
+		err    error
+		stderr string
+	}{
+		{name: "success"},
+		{name: "failure", err: exitErr, stderr: "  operation failed\n"},
+	}
+
+	for _, tt := range tests {
+		for _, execution := range executions {
+			for _, result := range results {
+				t.Run(tt.name+"/"+execution.name+"/"+result.name, func(t *testing.T) {
+					mockRunner := testutil.NewMockRunner()
+					options := execution.options
+					options.Runner = mockRunner
+
+					name := options.ZpoolBin
+					if name == "" {
+						name = "zpool"
+					}
+					args := tt.args
+					if options.Sudo {
+						args = append([]string{name}, args...)
+						name = "sudo"
+					}
+					combined := name + " " + strings.Join(args, " ")
+					mockRunner.AddCommand(combined, "", result.stderr, result.err)
+
+					err := tt.run(NewClient(options).Zpool)
+					if len(mockRunner.CallHistory) != 1 {
+						t.Fatalf("Expected exactly one command, got %d", len(mockRunner.CallHistory))
+					}
+					call := mockRunner.GetLastCall()
+					if call.Name != name || !slices.Equal(call.Args, args) {
+						t.Errorf("Expected command %q %q, got %q %q", name, args, call.Name, call.Args)
+					}
+
+					if result.err == nil {
+						if err != nil {
+							t.Fatalf("Unexpected error: %v", err)
+						}
+						return
+					}
+					var cmdErr *CmdError
+					if !errors.As(err, &cmdErr) {
+						t.Fatalf("Expected CmdError, got %T: %v", err, err)
+					}
+					if !errors.Is(err, result.err) {
+						t.Errorf("Expected wrapped runner error %v, got %v", result.err, err)
+					}
+					if cmdErr.Stderr != result.stderr {
+						t.Errorf("Expected stderr %q, got %q", result.stderr, cmdErr.Stderr)
+					}
+					if cmdErr.Cmd != name || !slices.Equal(cmdErr.Args, args) || cmdErr.Combined != combined {
+						t.Errorf("Unexpected command details in CmdError: %+v", cmdErr)
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestZPool_LifecycleWithoutClient(t *testing.T) {
+	ctx := context.Background()
+	pool := &ZPool{Name: "tank"}
+	tests := []struct {
+		name string
+		run  func() error
+	}{
+		{name: "destroy", run: func() error { return pool.Destroy(ctx) }},
+		{name: "destroy with default options", run: func() error {
+			return pool.DestroyWithOptions(ctx, ZPoolDestroyOptions{})
+		}},
+		{name: "destroy with force", run: func() error {
+			return pool.DestroyWithOptions(ctx, ZPoolDestroyOptions{Force: true})
+		}},
+		{name: "export", run: func() error { return pool.Export(ctx) }},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := tt.run(); err == nil || err.Error() != "no zpool client attached" {
+				t.Errorf("Expected missing-client error, got %v", err)
 			}
 		})
 	}
