@@ -142,24 +142,20 @@ func TestGenerateDeterministicUUID(t *testing.T) {
 			result1 := GenerateDeterministicUUID(tt.input)
 			result2 := GenerateDeterministicUUID(tt.input)
 
-			// Should be deterministic (same input = same output)
 			if result1 != result2 {
 				t.Errorf("GenerateDeterministicUUID is not deterministic for input %q: got %q and %q", tt.input, result1, result2)
 			}
 
-			// Should be valid UUID format (36 characters with dashes)
 			if len(result1) != 36 {
 				t.Errorf("GenerateDeterministicUUID(%q) = %q, expected 36 character UUID", tt.input, result1)
 			}
 
-			// Should not be empty
 			if result1 == "" {
 				t.Errorf("GenerateDeterministicUUID(%q) returned empty string", tt.input)
 			}
 		})
 	}
 
-	// Test that different inputs produce different UUIDs
 	uuid1 := GenerateDeterministicUUID("input1")
 	uuid2 := GenerateDeterministicUUID("input2")
 	if uuid1 == uuid2 {

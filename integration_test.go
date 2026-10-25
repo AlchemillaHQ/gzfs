@@ -14,9 +14,6 @@ import (
 	"github.com/alchemillahq/gzfs"
 )
 
-// Integration tests require actual ZFS commands to be available
-// Run with: go test -tags=integration
-
 func TestIntegration_ZFS_List(t *testing.T) {
 	if os.Getenv("GZFS_INTEGRATION_TESTS") == "" {
 		t.Skip("Integration tests disabled. Set GZFS_INTEGRATION_TESTS=1 to enable.")
@@ -24,7 +21,7 @@ func TestIntegration_ZFS_List(t *testing.T) {
 
 	ctx := context.Background()
 	client := gzfs.NewClient(gzfs.Options{
-		Sudo: false, // Set to true if ZFS commands require sudo
+		Sudo: false,
 	})
 
 	datasets, err := client.ZFS.List(ctx, false)
@@ -46,7 +43,7 @@ func TestIntegration_ZPool_List(t *testing.T) {
 
 	ctx := context.Background()
 	client := gzfs.NewClient(gzfs.Options{
-		Sudo: false, // Set to true if zpool commands require sudo
+		Sudo: false,
 	})
 
 	pools, err := client.Zpool.List(ctx)
@@ -59,7 +56,6 @@ func TestIntegration_ZPool_List(t *testing.T) {
 		t.Logf("Pool: %s, State: %s, Size: %d, Free: %d",
 			pool.Name, pool.State, pool.Size, pool.Free)
 
-		// Test ZDB integration
 		zdbPool, err := pool.ZDB(ctx)
 		if err != nil {
 			t.Errorf("Failed to get ZDB info for pool %s: %v", pool.Name, err)
@@ -164,7 +160,6 @@ func TestIntegration_ZFS_GetProperty(t *testing.T) {
 		Sudo: false,
 	})
 
-	// First get a list of datasets to test with
 	datasets, err := client.ZFS.List(ctx, false)
 	if err != nil {
 		t.Fatalf("Failed to list datasets: %v", err)
@@ -174,7 +169,6 @@ func TestIntegration_ZFS_GetProperty(t *testing.T) {
 		t.Skip("No datasets found for testing")
 	}
 
-	// Test getting a property from the first dataset
 	dataset := datasets[0]
 	prop, err := client.ZFS.GetProperty(ctx, dataset.Name, "compression")
 	if err != nil {
@@ -185,7 +179,42 @@ func TestIntegration_ZFS_GetProperty(t *testing.T) {
 		dataset.Name, prop.Value, prop.Source.Type)
 }
 
-// Benchmark tests
+func TestIntegration_ZFS_Inspection(t *testing.T) {
+	if os.Getenv("GZFS_INTEGRATION_TESTS") != "1" {
+		t.Skip("Integration tests disabled. Set GZFS_INTEGRATION_TESTS=1 to enable.")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	client := gzfs.NewClient(gzfs.Options{})
+	datasets, err := client.ZFS.ListByType(ctx, gzfs.DatasetTypeFilesystem, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(datasets) == 0 {
+		t.Skip("No filesystems available for inspection")
+	}
+	previous := ""
+	for _, dataset := range datasets {
+		if dataset.Name < previous {
+			t.Fatalf("datasets are not ordered by name: %q before %q", previous, dataset.Name)
+		}
+		previous = dataset.Name
+		for _, name := range []string{"sharenfs", "keystatus", "canmount", "acltype"} {
+			if _, ok := dataset.Properties[name]; !ok {
+				t.Errorf("dataset %s is missing inspection property %s", dataset.Name, name)
+			}
+		}
+	}
+	dataset := datasets[0]
+	properties, err := dataset.GetProperties(ctx, "sharenfs", "keystatus", "canmount", "acltype")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, property := range properties {
+		t.Logf("%s: %s=%q source=%s inherited-from=%s", dataset.Name, name, property.Value, property.Source.Type, property.Source.Data)
+	}
+}
+
 func BenchmarkZFS_List(b *testing.B) {
 	if os.Getenv("GZFS_INTEGRATION_TESTS") == "" {
 		b.Skip("Integration tests disabled. Set GZFS_INTEGRATION_TESTS=1 to enable.")

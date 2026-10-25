@@ -18,12 +18,10 @@ func main() {
 
 	ctx := context.Background()
 
-	// Create a client. This assumes zdb/zpool/zfs all need sudo.
 	client := gzfs.NewClient(gzfs.Options{
 		Sudo: false,
 	})
 
-	// We don't have a GUID helper wired yet, so pass "" for now.
 	pool, err := client.ZDB.GetPool(ctx, poolName, "")
 	if err != nil {
 		log.Fatalf("zdb error for pool %q: %v", poolName, err)
@@ -40,7 +38,6 @@ func main() {
 	}
 }
 
-// printVdev prints a ZDBPoolChild tree with indentation.
 func printVdev(v gzfs.ZDBPoolChild, indent int) {
 	prefix := spaces(indent)
 	fmt.Printf("%s- type=%s", prefix, v.Type)

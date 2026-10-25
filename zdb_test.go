@@ -81,7 +81,6 @@ func TestZDB_GetPool(t *testing.T) {
 					t.Errorf("Expected pool GUID %q, got %q", tt.expectedGUID, pool.GUID)
 				}
 
-				// Check that we have parsed some children
 				if len(pool.Children) == 0 {
 					t.Error("Expected pool to have children VDEVs")
 				}
@@ -99,7 +98,7 @@ func TestZDB_Caching(t *testing.T) {
 			Bin:    "zdb",
 			Runner: mockRunner,
 		},
-		cacheTTL: 100 * time.Millisecond, // Short TTL for testing
+		cacheTTL: 100 * time.Millisecond,
 	}
 
 	poolName := "tank"
@@ -115,7 +114,6 @@ func TestZDB_Caching(t *testing.T) {
 			t.Fatal("Expected non-nil pool")
 		}
 
-		// Should have one call recorded
 		if len(mockRunner.CallHistory) != 1 {
 			t.Errorf("Expected 1 command call, got %d", len(mockRunner.CallHistory))
 		}
@@ -130,14 +128,12 @@ func TestZDB_Caching(t *testing.T) {
 			t.Fatal("Expected non-nil pool")
 		}
 
-		// Should still have only one call (cached)
 		if len(mockRunner.CallHistory) != 1 {
 			t.Errorf("Expected 1 command call (cached), got %d", len(mockRunner.CallHistory))
 		}
 	})
 
 	t.Run("call after cache expiry hits command again", func(t *testing.T) {
-		// Wait for cache to expire
 		time.Sleep(150 * time.Millisecond)
 
 		pool, err := client.GetPool(ctx, poolName, "")
@@ -148,7 +144,6 @@ func TestZDB_Caching(t *testing.T) {
 			t.Fatal("Expected non-nil pool")
 		}
 
-		// Should have two calls now (cache expired)
 		if len(mockRunner.CallHistory) != 2 {
 			t.Errorf("Expected 2 command calls (cache expired), got %d", len(mockRunner.CallHistory))
 		}
@@ -245,7 +240,6 @@ func TestZDBPoolChild_parseProp(t *testing.T) {
 			}
 
 			if !tt.hasError {
-				// Check specific fields
 				switch tt.prop {
 				case "type":
 					if child.Type != tt.expected.Type {
@@ -269,7 +263,6 @@ func TestZDBPoolChild_parseProp(t *testing.T) {
 					}
 				}
 
-				// Check properties map
 				if child.Properties == nil {
 					t.Error("Expected properties to be initialized")
 				} else if child.Properties[tt.prop] != tt.val {

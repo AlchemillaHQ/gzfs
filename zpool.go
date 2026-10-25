@@ -13,7 +13,6 @@ type zpool struct {
 	zfs *zfs
 }
 
-// ZPoolCreateOptions configures creation of a ZFS pool.
 type ZPoolCreateOptions struct {
 	Force bool
 	// Mountpoint sets the pool's root dataset mountpoint. An empty value uses the ZFS default.
@@ -21,7 +20,6 @@ type ZPoolCreateOptions struct {
 	Properties map[string]string
 }
 
-// ZPoolDestroyOptions configures destruction of a ZFS pool.
 type ZPoolDestroyOptions struct {
 	// Force forcibly unmounts the pool's datasets before destroying it.
 	Force bool
@@ -475,7 +473,6 @@ func (z *zpool) Create(ctx context.Context, name string, force bool, properties 
 	}, args...)
 }
 
-// CreateWithOptions creates a ZFS pool with the supplied options and vdev arguments.
 func (z *zpool) CreateWithOptions(ctx context.Context, name string, options ZPoolCreateOptions, args ...string) error {
 	cli := make([]string, 0, 8)
 	cli = append(cli, "create")

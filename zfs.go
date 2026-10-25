@@ -7,8 +7,10 @@ import (
 	"io"
 	"maps"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 type zfs struct {
@@ -73,11 +75,35 @@ func toZfsType(t DatasetType) string {
 func (z *zfs) hydrateDataset(d *Dataset) {
 	d.z = z
 	d.GUID = ParseString(d.Properties["guid"].Value)
-	d.Mountpoint = ParseString(d.Properties["mountpoint"].Value)
+	// Mountpoints are paths: leading/trailing spaces may be part of the name.
+	// Only normalize ZFS's inapplicable-property sentinel, not path whitespace.
+	d.Mountpoint = d.Properties["mountpoint"].Value
+	if d.Mountpoint == "-" {
+		d.Mountpoint = ""
+	}
 	d.Used = ParseSize(d.Properties["used"].Value)
 	d.Available = ParseSize(d.Properties["available"].Value)
 	d.Referenced = ParseSize(d.Properties["referenced"].Value)
 	d.Compressratio = ParseRatio(d.Properties["compressratio"].Value)
+}
+
+func (z *zfs) datasetsFromList(entries map[string]*Dataset) ([]*Dataset, error) {
+	names := make([]string, 0, len(entries))
+	for name := range entries {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	datasets := make([]*Dataset, 0, len(entries))
+	for _, name := range names {
+		dataset := entries[name]
+		if dataset == nil {
+			return nil, fmt.Errorf("null dataset %q in zfs list output", name)
+		}
+		z.hydrateDataset(dataset)
+		datasets = append(datasets, dataset)
+	}
+	return datasets, nil
 }
 
 func (z *zfs) listArgs(name string, recursive bool, t *DatasetType) []string {
@@ -115,46 +141,33 @@ func (z *zfs) List(ctx context.Context, recursive bool, name ...string) ([]*Data
 		return nil, err
 	}
 
-	datasets := make([]*Dataset, 0, len(resp.Datasets))
-	for _, d := range resp.Datasets {
-		z.hydrateDataset(d)
-		datasets = append(datasets, d)
-	}
-
-	return datasets, nil
+	return z.datasetsFromList(resp.Datasets)
 }
 
 func (z *zfs) ListWithPrefix(ctx context.Context, t DatasetType, prefix string, recursive bool) ([]*Dataset, error) {
 	var resp DatasetList
 	var dType *DatasetType
 
-	if t == DatasetTypeAll {
-		dType = nil
-	} else {
+	if t != DatasetTypeAll {
 		dType = &t
 	}
 
-	if prefix == "" {
-		args := z.listArgs("", recursive, dType)
-		if err := z.cmd.RunJSON(ctx, &resp, args...); err != nil {
-			return nil, err
-		}
-	} else {
-		args := z.listArgs(prefix, recursive, dType)
-		if err := z.cmd.RunJSON(ctx, &resp, args...); err != nil {
-			return nil, err
-		}
+	args := z.listArgs(prefix, recursive, dType)
+	if err := z.cmd.RunJSON(ctx, &resp, args...); err != nil {
+		return nil, err
 	}
 
-	datasets := make([]*Dataset, 0, len(resp.Datasets))
-	for _, d := range resp.Datasets {
-		if prefix == "" || strings.HasPrefix(d.Name, prefix) {
-			z.hydrateDataset(d)
-			datasets = append(datasets, d)
+	datasets, err := z.datasetsFromList(resp.Datasets)
+	if err != nil {
+		return nil, err
+	}
+	filtered := make([]*Dataset, 0, len(datasets))
+	for _, dataset := range datasets {
+		if prefix == "" || strings.HasPrefix(dataset.Name, prefix) {
+			filtered = append(filtered, dataset)
 		}
 	}
-
-	return datasets, nil
+	return filtered, nil
 }
 
 func (z *zfs) Get(ctx context.Context, name string, recursive bool) (*Dataset, error) {
@@ -170,8 +183,9 @@ func (z *zfs) Get(ctx context.Context, name string, recursive bool) (*Dataset, e
 	if !ok {
 		return nil, nil
 	}
-
-	dataset.z = z
+	if dataset == nil {
+		return nil, fmt.Errorf("null dataset %q in zfs list output", name)
+	}
 
 	z.hydrateDataset(dataset)
 
@@ -179,6 +193,9 @@ func (z *zfs) Get(ctx context.Context, name string, recursive bool) (*Dataset, e
 }
 
 func (z *zfs) GetByGUID(ctx context.Context, guid string, recursive bool) (*Dataset, error) {
+	if strings.TrimSpace(guid) == "" {
+		return nil, fmt.Errorf("dataset GUID is empty")
+	}
 	var resp DatasetList
 
 	args := append([]string{"get"}, zfsArgs...)
@@ -190,12 +207,19 @@ func (z *zfs) GetByGUID(ctx context.Context, guid string, recursive bool) (*Data
 
 	var datasetName string
 	for name, ds := range resp.Datasets {
-		if ds != nil {
-			dsGUID := ParseString(ds.Properties["guid"].Value)
-			if dsGUID == guid {
-				datasetName = name
-				break
+		if ds == nil {
+			return nil, fmt.Errorf("null dataset %q in zfs get output", name)
+		}
+		property, ok := ds.Properties["guid"]
+		dsGUID := ParseString(property.Value)
+		if !ok || dsGUID == "" {
+			return nil, fmt.Errorf("GUID missing for dataset %q in zfs get output", name)
+		}
+		if dsGUID == guid {
+			if datasetName != "" {
+				return nil, fmt.Errorf("dataset GUID %q is ambiguous; more than one dataset matches", guid)
 			}
+			datasetName = name
 		}
 	}
 
@@ -203,34 +227,93 @@ func (z *zfs) GetByGUID(ctx context.Context, guid string, recursive bool) (*Data
 		return nil, nil
 	}
 
-	return z.Get(ctx, datasetName, recursive)
+	dataset, err := z.Get(ctx, datasetName, recursive)
+	if err != nil {
+		return nil, err
+	}
+	// A rename, destroy/recreate or receive may have changed the name-to-GUID
+	// mapping since discovery. Never return a different filesystem to the caller.
+	if dataset == nil || dataset.GUID != guid {
+		return nil, fmt.Errorf("dataset %q changed during lookup of GUID %q", datasetName, guid)
+	}
+	return dataset, nil
+}
+
+// GetProperties queries fresh property values for one dataset in a single ZFS
+// command, preserving each value and its source (including inheritance). With no
+// property names, or just "all", it returns all properties. Named queries fail
+// if any requested property is missing; no partial result is returned.
+func (z *zfs) GetProperties(ctx context.Context, datasetName string, propertyNames ...string) (map[string]ZFSProperty, error) {
+	if z == nil {
+		return nil, fmt.Errorf("zfs client is nil")
+	}
+	if strings.TrimSpace(datasetName) == "" || strings.HasPrefix(datasetName, "-") || strings.IndexFunc(datasetName, unicode.IsControl) >= 0 {
+		return nil, fmt.Errorf("invalid dataset name")
+	}
+	names, err := propertyQueryNames(propertyNames)
+	if err != nil {
+		return nil, err
+	}
+
+	var resp DatasetList
+	args := append([]string{"get"}, zfsArgs...)
+	args = append(args, strings.Join(names, ","), datasetName)
+	if err := z.cmd.RunJSON(ctx, &resp, args...); err != nil {
+		return nil, err
+	}
+
+	dataset := resp.Datasets[datasetName]
+	if dataset == nil {
+		return nil, fmt.Errorf("dataset %q not found in zfs get output", datasetName)
+	}
+	if len(dataset.Properties) == 0 {
+		return nil, fmt.Errorf("no properties returned for dataset %q", datasetName)
+	}
+	if names[0] == "all" {
+		return dataset.Properties, nil
+	}
+	properties := make(map[string]ZFSProperty, len(names))
+	for _, name := range names {
+		property, ok := dataset.Properties[name]
+		if !ok {
+			return nil, fmt.Errorf("property %q not found on dataset %q", name, datasetName)
+		}
+		properties[name] = property
+	}
+	return properties, nil
+}
+
+func propertyQueryNames(input []string) ([]string, error) {
+	if len(input) == 0 {
+		return []string{"all"}, nil
+	}
+	names := make([]string, 0, len(input))
+	seen := make(map[string]bool, len(input))
+	for _, name := range input {
+		if strings.TrimSpace(name) == "" || strings.HasPrefix(name, "-") || strings.ContainsRune(name, ',') || strings.IndexFunc(name, unicode.IsControl) >= 0 {
+			return nil, fmt.Errorf("invalid property name %q; supply one property per argument", name)
+		}
+		if !seen[name] {
+			names = append(names, name)
+			seen[name] = true
+		}
+	}
+	if seen["all"] && len(names) != 1 {
+		return nil, fmt.Errorf("all cannot be combined with named properties")
+	}
+	return names, nil
 }
 
 func (z *zfs) GetProperty(ctx context.Context, datasetName, propName string) (ZFSProperty, error) {
-	var resp DatasetList
-
-	args := append([]string{"get"}, zfsArgs...)
-	args = append(args, propName, datasetName)
-
-	if err := z.cmd.RunJSON(ctx, &resp, args...); err != nil {
+	properties, err := z.GetProperties(ctx, datasetName, propName)
+	if err != nil {
 		return ZFSProperty{}, err
 	}
-
-	ds, ok := resp.Datasets[datasetName]
-	if !ok || ds == nil {
-		return ZFSProperty{}, fmt.Errorf("dataset %q not found in zfs get output", datasetName)
-	}
-
-	if ds.Properties == nil {
-		return ZFSProperty{}, fmt.Errorf("no properties returned for dataset %q", datasetName)
-	}
-
-	prop, ok := ds.Properties[propName]
+	property, ok := properties[propName]
 	if !ok {
 		return ZFSProperty{}, fmt.Errorf("property %q not found on dataset %q", propName, datasetName)
 	}
-
-	return prop, nil
+	return property, nil
 }
 
 func (z *zfs) ListByType(ctx context.Context, t DatasetType, recursive bool, name ...string) ([]*Dataset, error) {
@@ -247,13 +330,7 @@ func (z *zfs) ListByType(ctx context.Context, t DatasetType, recursive bool, nam
 		return nil, err
 	}
 
-	datasets := make([]*Dataset, 0, len(resp.Datasets))
-	for _, d := range resp.Datasets {
-		z.hydrateDataset(d)
-		datasets = append(datasets, d)
-	}
-
-	return datasets, nil
+	return z.datasetsFromList(resp.Datasets)
 }
 
 func prepareEncryptionKey(name string, props map[string]string) error {
@@ -713,6 +790,8 @@ func (d *Dataset) Destroy(ctx context.Context, recursive bool, deferDeletion boo
 	return nil
 }
 
+// GetProperty reads a property from this dataset's cached snapshot. It does not
+// execute a command; use GetProperties to query fresh values from ZFS.
 func (d *Dataset) GetProperty(ctx context.Context, name string) (ZFSProperty, error) {
 	if d == nil {
 		return ZFSProperty{}, fmt.Errorf("dataset is nil")
@@ -732,6 +811,18 @@ func (d *Dataset) GetProperty(ctx context.Context, name string) (ZFSProperty, er
 	}
 
 	return prop, nil
+}
+
+// GetProperties queries fresh properties without changing this dataset's cached
+// snapshot. Like zfs.GetProperties, omitting names requests all properties.
+func (d *Dataset) GetProperties(ctx context.Context, propertyNames ...string) (map[string]ZFSProperty, error) {
+	if d == nil {
+		return nil, fmt.Errorf("dataset is nil")
+	}
+	if d.z == nil {
+		return nil, fmt.Errorf("no zfs client attached")
+	}
+	return d.z.GetProperties(ctx, d.Name, propertyNames...)
 }
 
 func (d *Dataset) Snapshots() ([]*Dataset, error) {
@@ -842,6 +933,13 @@ func (d *Dataset) IsEncrypted() bool {
 	}
 	v := strings.TrimSpace(prop.Value)
 	return v != "" && v != "off"
+}
+
+// IsMounted reports whether this filesystem's cached mounted property is "yes".
+// It does not inspect the kernel mount table or prove that Mountpoint still
+// belongs to this dataset. Missing/unknown state and non-filesystems return false.
+func (d *Dataset) IsMounted() bool {
+	return d != nil && d.Type == DatasetTypeFilesystem && d.Properties["mounted"].Value == "yes"
 }
 
 func (d *Dataset) MountWithKey(ctx context.Context, overlay bool, options ...string) error {
@@ -958,33 +1056,17 @@ func (d *Dataset) GetEncryptionProperties(ctx context.Context) (*EncryptionPrope
 		return nil, fmt.Errorf("no zfs client attached")
 	}
 
-	encProp, err := d.z.GetProperty(ctx, d.Name, "encryption")
+	properties, err := d.GetProperties(ctx, "encryption", "keylocation", "keyformat", "keystatus", "encryptionroot")
 	if err != nil {
-		return nil, fmt.Errorf("get_encryption_property_failed: %w", err)
-	}
-	keylocProp, err := d.z.GetProperty(ctx, d.Name, "keylocation")
-	if err != nil {
-		return nil, fmt.Errorf("get_keylocation_property_failed: %w", err)
-	}
-	keyfmtProp, err := d.z.GetProperty(ctx, d.Name, "keyformat")
-	if err != nil {
-		return nil, fmt.Errorf("get_keyformat_property_failed: %w", err)
-	}
-	keystatProp, err := d.z.GetProperty(ctx, d.Name, "keystatus")
-	if err != nil {
-		return nil, fmt.Errorf("get_keystatus_property_failed: %w", err)
-	}
-	encrootProp, err := d.z.GetProperty(ctx, d.Name, "encryptionroot")
-	if err != nil {
-		return nil, fmt.Errorf("get_encryptionroot_property_failed: %w", err)
+		return nil, fmt.Errorf("get_encryption_properties_failed: %w", err)
 	}
 
 	return &EncryptionProperties{
-		Encryption:     strings.TrimSpace(encProp.Value),
-		KeyLocation:    strings.TrimSpace(keylocProp.Value),
-		KeyFormat:      strings.TrimSpace(keyfmtProp.Value),
-		KeyStatus:      strings.TrimSpace(keystatProp.Value),
-		EncryptionRoot: strings.TrimSpace(encrootProp.Value),
+		Encryption:     strings.TrimSpace(properties["encryption"].Value),
+		KeyLocation:    strings.TrimSpace(properties["keylocation"].Value),
+		KeyFormat:      strings.TrimSpace(properties["keyformat"].Value),
+		KeyStatus:      strings.TrimSpace(properties["keystatus"].Value),
+		EncryptionRoot: strings.TrimSpace(properties["encryptionroot"].Value),
 	}, nil
 }
 

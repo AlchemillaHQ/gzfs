@@ -1,7 +1,5 @@
 package testutil
 
-// Sample JSON responses for testing ZFS commands
-
 const ZFSListJSON = `{
   "output_version": {
     "command": "zfs list",

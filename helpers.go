@@ -34,6 +34,7 @@ var (
 		"aclmode", "aclinherit", "primarycache", "volmode", "compressratio",
 		"atime", "dedup", "volblocksize", "encryption", "encryptionroot",
 		"keyformat", "keylocation", "refreservation", "readonly",
+		"sharenfs", "keystatus", "canmount", "acltype",
 	}
 )
 
@@ -43,12 +44,10 @@ func ParseSize(value string) uint64 {
 		return 0
 	}
 
-	// Strip non-size suffixes early
 	if strings.HasSuffix(s, "%") || strings.HasSuffix(s, "x") {
 		return 0
 	}
 
-	// Find numeric + unit boundary
 	var numPart string
 	var unitPart string
 
@@ -85,7 +84,6 @@ func ParseSize(value string) uint64 {
 	case "P", "PB":
 		return uint64(val * 1024 * 1024 * 1024 * 1024 * 1024)
 	default:
-		// Unknown unit
 		return 0
 	}
 }

@@ -54,12 +54,10 @@ func TestNewClient(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			client := NewClient(tt.opts)
 
-			// Verify client is not nil
 			if client == nil {
 				t.Fatal("NewClient returned nil")
 			}
 
-			// Verify all components are initialized
 			if client.ZFS == nil {
 				t.Error("ZFS client is nil")
 			}
@@ -70,7 +68,6 @@ func TestNewClient(t *testing.T) {
 				t.Error("ZDB client is nil")
 			}
 
-			// Verify default binaries are set
 			expectedZFS := "zfs"
 			if tt.opts.ZFSBin != "" {
 				expectedZFS = tt.opts.ZFSBin
@@ -95,7 +92,6 @@ func TestNewClient(t *testing.T) {
 				t.Errorf("Expected ZDB bin %q, got %q", expectedZDB, client.ZDB.cmd.Bin)
 			}
 
-			// Verify sudo setting
 			if client.ZFS.cmd.Sudo != tt.opts.Sudo {
 				t.Errorf("Expected ZFS sudo %v, got %v", tt.opts.Sudo, client.ZFS.cmd.Sudo)
 			}
@@ -113,25 +109,23 @@ func TestCmd_RunBytes(t *testing.T) {
 	ctx := context.Background()
 
 	tests := []struct {
-		name           string
-		cmd            Cmd
-		args           []string
-		mockOutput     string
-		mockError      error
-		expectedStdout string
-		expectError    bool
+		name        string
+		cmd         Cmd
+		args        []string
+		mockOutput  string
+		mockError   error
+		expectError bool
 	}{
 		{
 			name: "successful command",
 			cmd: Cmd{
 				Bin:    "echo",
 				Sudo:   false,
-				Runner: nil, // Will use default LocalRunner in test
+				Runner: nil,
 			},
-			args:           []string{"hello"},
-			mockOutput:     "hello\n",
-			expectedStdout: "hello\n",
-			expectError:    false,
+			args:        []string{"hello"},
+			mockOutput:  "hello\n",
+			expectError: false,
 		},
 		{
 			name: "command with sudo",
@@ -157,11 +151,9 @@ func TestCmd_RunBytes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create a mock runner for controlled testing
 			mockRunner := testutil.NewMockRunner()
 			tt.cmd.Runner = mockRunner
 
-			// Set up the mock command
 			expectedCmd := tt.cmd.Bin + " " + strings.Join(tt.args, " ")
 			if tt.cmd.Sudo {
 				expectedCmd = "sudo " + tt.cmd.Bin + " " + strings.Join(tt.args, " ")
@@ -169,10 +161,8 @@ func TestCmd_RunBytes(t *testing.T) {
 
 			mockRunner.AddCommand(expectedCmd, tt.mockOutput, "", tt.mockError)
 
-			// Execute the command
-			stdout, stderr, err := tt.cmd.RunBytes(ctx, nil, tt.args...)
+			stdout, _, err := tt.cmd.RunBytes(ctx, nil, tt.args...)
 
-			// Check error expectation
 			if tt.expectError && err == nil {
 				t.Error("Expected error but got nil")
 			}
@@ -180,19 +170,12 @@ func TestCmd_RunBytes(t *testing.T) {
 				t.Errorf("Unexpected error: %v", err)
 			}
 
-			// Check stdout if no error expected
 			if !tt.expectError {
 				if string(stdout) != tt.mockOutput {
 					t.Errorf("Expected stdout %q, got %q", tt.mockOutput, string(stdout))
 				}
 			}
 
-			// Verify stderr is returned (even if empty)
-			if stderr == nil && !tt.expectError {
-				// Note: stderr may be nil if no output written to it
-			}
-
-			// Verify the command was called
 			lastCall := mockRunner.GetLastCall()
 			if lastCall == nil {
 				t.Fatal("No command was executed")
@@ -247,7 +230,6 @@ func TestCmd_RunJSON(t *testing.T) {
 				Runner: mockRunner,
 			}
 
-			// The RunJSON method appends "-j" to args
 			mockRunner.AddCommand("test  -j", tt.mockJSON, "", tt.mockError)
 
 			var result TestStruct
@@ -315,7 +297,6 @@ func TestCmdError(t *testing.T) {
 				t.Errorf("Expected error message %q, got %q", tt.expected, result)
 			}
 
-			// Test Unwrap
 			if tt.cmdErr.ExitErr != nil {
 				unwrapped := tt.cmdErr.Unwrap()
 				if unwrapped != tt.cmdErr.ExitErr {
@@ -331,7 +312,6 @@ func TestLocalRunner(t *testing.T) {
 	runner := LocalRunner{}
 
 	t.Run("successful command", func(t *testing.T) {
-		// This test requires the 'echo' command to be available
 		var stdout, stderr strings.Builder
 		err := runner.Run(ctx, nil, &stdout, &stderr, "echo", "hello", "world")
 
@@ -356,7 +336,7 @@ func TestLocalRunner(t *testing.T) {
 
 	t.Run("context cancellation", func(t *testing.T) {
 		cancelCtx, cancel := context.WithCancel(ctx)
-		cancel() // Cancel immediately
+		cancel()
 
 		var stdout, stderr strings.Builder
 		err := runner.Run(cancelCtx, nil, &stdout, &stderr, "sleep", "10")

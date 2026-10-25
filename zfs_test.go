@@ -48,7 +48,6 @@ func TestZFS_List(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			mockRunner := testutil.NewMockRunner()
 
-			// Create ZFS client with mock runner
 			client := &zfs{
 				cmd: Cmd{
 					Bin:    "zfs",
@@ -56,10 +55,7 @@ func TestZFS_List(t *testing.T) {
 				},
 			}
 
-			if tt.expectError {
-				// Don't add a mock response to trigger error
-			} else {
-				// Add expected command with JSON response
+			if !tt.expectError {
 				expectedCmd := "zfs list -o " + strings.Join(dsPropList, ",") + " -p"
 				if tt.recursive {
 					expectedCmd += " -r"
@@ -71,10 +67,8 @@ func TestZFS_List(t *testing.T) {
 				mockRunner.AddCommand(expectedCmd, tt.mockJSON, "", nil)
 			}
 
-			// Execute the test
 			datasets, err := client.List(ctx, tt.recursive, tt.dataset)
 
-			// Check error expectation
 			if tt.expectError && err == nil {
 				t.Error("Expected error but got nil")
 			}
@@ -82,19 +76,16 @@ func TestZFS_List(t *testing.T) {
 				t.Errorf("Unexpected error: %v", err)
 			}
 
-			// Check results
 			if !tt.expectError {
 				if len(datasets) != tt.expectedLen {
 					t.Errorf("Expected %d datasets, got %d", tt.expectedLen, len(datasets))
 				}
 
-				// Verify dataset properties are parsed
 				for _, ds := range datasets {
 					if ds.z == nil {
 						t.Error("Dataset should have zfs client reference")
 					}
 
-					// Check that parsed values are not zero (they should be populated from JSON)
 					if ds.Used == 0 && ds.Name != "" {
 						t.Errorf("Dataset %s should have non-zero Used value", ds.Name)
 					}
@@ -892,14 +883,11 @@ func TestDataset_GetEncryptionProperties(t *testing.T) {
 			if tt.dataset != nil && tt.dataset.z != nil {
 				tt.dataset.z.cmd.Runner = mockRunner
 
-				props := []string{"encryption", "keylocation", "keyformat", "keystatus", "encryptionroot"}
-				for _, prop := range props {
-					cmd := fmt.Sprintf("zfs get -p %s %s -j", prop, tt.dataset.Name)
-					if tt.mockError {
-						mockRunner.AddCommand(cmd, "", "get error", fmt.Errorf("exit status 1"))
-					} else {
-						mockRunner.AddCommand(cmd, testutil.ZFSGetEncryptionJSON, "", nil)
-					}
+				cmd := fmt.Sprintf("zfs get -p encryption,keylocation,keyformat,keystatus,encryptionroot %s -j", tt.dataset.Name)
+				if tt.mockError {
+					mockRunner.AddCommand(cmd, "", "get error", fmt.Errorf("exit status 1"))
+				} else {
+					mockRunner.AddCommand(cmd, testutil.ZFSGetEncryptionJSON, "", nil)
 				}
 			}
 
@@ -930,6 +918,9 @@ func TestDataset_GetEncryptionProperties(t *testing.T) {
 				}
 				if result.EncryptionRoot != "tank/enc" {
 					t.Errorf("Expected encryptionroot 'tank/enc', got %q", result.EncryptionRoot)
+				}
+				if len(mockRunner.CallHistory) != 1 {
+					t.Fatalf("encryption properties used %d commands, want one", len(mockRunner.CallHistory))
 				}
 			}
 		})
