@@ -217,6 +217,98 @@ func TestDataset_GetPropertiesIsFreshWithoutChangingCachedSnapshot(t *testing.T)
 	}
 }
 
+func TestZFS_InheritPropertiesRunsOneCommandPerProperty(t *testing.T) {
+	runner := testutil.NewMockRunner()
+	client := NewClient(Options{Runner: runner})
+	runner.AddCommand("zfs inherit compression tank/share", "", "", nil)
+	runner.AddCommand("zfs inherit atime tank/share", "", "", nil)
+	if err := client.ZFS.InheritProperties(context.Background(), "tank/share", "compression", "atime", "compression"); err != nil {
+		t.Fatal(err)
+	}
+	var commands []string
+	for _, call := range runner.CallHistory {
+		commands = append(commands, call.Cmd)
+	}
+	want := []string{"zfs inherit compression tank/share", "zfs inherit atime tank/share"}
+	if !reflect.DeepEqual(commands, want) {
+		t.Fatalf("commands = %#v, want %#v", commands, want)
+	}
+}
+
+func TestZFS_InheritPropertiesRejectsInvalidArgumentsBeforeRunning(t *testing.T) {
+	for _, names := range [][]string{
+		nil, {""}, {" "}, {"-r"}, {"compression,atime"}, {"compression\natime"}, {"all"}, {"atime", "all"},
+	} {
+		runner := testutil.NewMockRunner()
+		client := NewClient(Options{Runner: runner})
+		if err := client.ZFS.InheritProperties(context.Background(), "tank/share", names...); err == nil {
+			t.Errorf("accepted invalid property arguments %q", names)
+		}
+		if len(runner.CallHistory) != 0 {
+			t.Errorf("invalid arguments ran a command: %#v", runner.CallHistory)
+		}
+	}
+	for _, name := range []string{"", " ", "-r", "tank/share\x00", "tank/share\nother"} {
+		runner := testutil.NewMockRunner()
+		client := NewClient(Options{Runner: runner})
+		if err := client.ZFS.InheritProperties(context.Background(), name, "compression"); err == nil {
+			t.Errorf("accepted invalid dataset argument %q", name)
+		}
+		if len(runner.CallHistory) != 0 {
+			t.Errorf("invalid dataset ran a command: %#v", runner.CallHistory)
+		}
+	}
+	var client *zfs
+	if err := client.InheritProperties(context.Background(), "tank/share", "compression"); err == nil {
+		t.Fatal("nil client did not return an error")
+	}
+}
+
+func TestZFS_InheritPropertiesStopsAtFirstFailure(t *testing.T) {
+	runner := testutil.NewMockRunner()
+	client := NewClient(Options{Runner: runner})
+	failure := errors.New("exit status 1")
+	runner.AddCommand("zfs inherit quota tank/share", "", "'quota' property cannot be inherited", failure)
+	err := client.ZFS.InheritProperties(context.Background(), "tank/share", "quota", "atime")
+	if err == nil || !errors.Is(err, failure) || !strings.Contains(err.Error(), "quota") {
+		t.Fatalf("failure was not reported with the property: %v", err)
+	}
+	if len(runner.CallHistory) != 1 {
+		t.Fatalf("ran commands after a failure: %#v", runner.CallHistory)
+	}
+}
+
+func TestZFS_InheritPropertiesUsesConfiguredCommandAndSingleArguments(t *testing.T) {
+	runner := testutil.NewMockRunner()
+	client := NewClient(Options{Runner: runner, Sudo: true, ZFSBin: "/custom/zfs"})
+	runner.AddCommand("sudo /custom/zfs inherit org.example:nfs tank/share with spaces", "", "", nil)
+	if err := client.ZFS.InheritProperties(context.Background(), "tank/share with spaces", "org.example:nfs"); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"/custom/zfs", "inherit", "org.example:nfs", "tank/share with spaces"}
+	if len(runner.CallHistory) != 1 || !reflect.DeepEqual(runner.CallHistory[0].Args, want) {
+		t.Fatalf("arguments were split or changed: %#v", runner.CallHistory)
+	}
+}
+
+func TestDataset_InheritProperties(t *testing.T) {
+	runner := testutil.NewMockRunner()
+	client := NewClient(Options{Runner: runner})
+	runner.AddCommand("zfs inherit compression tank/share", "", "", nil)
+	dataset := &Dataset{z: client.ZFS, Name: "tank/share"}
+	if err := dataset.InheritProperties(context.Background(), "compression"); err != nil {
+		t.Fatal(err)
+	}
+	if len(runner.CallHistory) != 1 || runner.CallHistory[0].Cmd != "zfs inherit compression tank/share" {
+		t.Fatalf("unexpected commands: %#v", runner.CallHistory)
+	}
+	for _, dataset := range []*Dataset{nil, {Name: "tank/share"}} {
+		if err := dataset.InheritProperties(context.Background(), "compression"); err == nil {
+			t.Fatalf("unattached dataset %#v did not return an error", dataset)
+		}
+	}
+}
+
 func TestDataset_GetEncryptionPropertiesRejectsPartialBatch(t *testing.T) {
 	runner := testutil.NewMockRunner()
 	client := NewClient(Options{Runner: runner})

@@ -150,6 +150,84 @@ func TestIntegration_ZPool_Lifecycle(t *testing.T) {
 	}
 }
 
+func TestIntegration_ZFS_InheritProperties(t *testing.T) {
+	if os.Getenv("GZFS_INTEGRATION_TESTS") != "1" {
+		t.Skip("Integration tests disabled. Set GZFS_INTEGRATION_TESTS=1 to enable.")
+	}
+	if runtime.GOOS != "freebsd" {
+		t.Skip("Inherit integration test requires FreeBSD")
+	}
+	if os.Geteuid() != 0 {
+		t.Skip("Inherit integration test requires root privileges")
+	}
+
+	dir, err := os.MkdirTemp("", "gzfs-inherit-")
+	if err != nil {
+		t.Fatalf("Failed to create scratch directory: %v", err)
+	}
+	name := filepath.Base(dir)
+	device := filepath.Join(dir, "vdev")
+	client := gzfs.NewClient(gzfs.Options{})
+	created := false
+	t.Cleanup(func() {
+		if created {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+			defer cancel()
+			if err := client.Zpool.Destroy(ctx, name, true); err != nil {
+				t.Errorf("Failed to destroy scratch pool during cleanup; retaining %s: %v", dir, err)
+				return
+			}
+		}
+		if err := os.RemoveAll(dir); err != nil {
+			t.Errorf("Failed to remove scratch directory: %v", err)
+		}
+	})
+
+	file, err := os.Create(device)
+	if err != nil {
+		t.Fatalf("Failed to create file vdev: %v", err)
+	}
+	err = file.Truncate(128 << 20)
+	closeErr := file.Close()
+	if err != nil {
+		t.Fatalf("Failed to size file vdev: %v", err)
+	}
+	if closeErr != nil {
+		t.Fatalf("Failed to close file vdev: %v", closeErr)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	if err := client.Zpool.CreateWithOptions(ctx, name, gzfs.ZPoolCreateOptions{
+		Mountpoint: "none",
+		Properties: map[string]string{"cachefile": "none"},
+	}, device); err != nil {
+		t.Fatalf("Failed to create scratch pool: %v", err)
+	}
+	created = true
+
+	child := name + "/child"
+	if _, err := client.ZFS.CreateFilesystem(ctx, child, map[string]string{"compression": "off"}); err != nil {
+		t.Fatalf("Failed to create filesystem: %v", err)
+	}
+	property, err := client.ZFS.GetProperty(ctx, child, "compression")
+	if err != nil || property.Source.Type != "LOCAL" {
+		t.Fatalf("compression was not set locally: %#v, %v", property, err)
+	}
+
+	if err := client.ZFS.InheritProperties(ctx, child, "compression"); err != nil {
+		t.Fatalf("Failed to inherit compression: %v", err)
+	}
+	property, err = client.ZFS.GetProperty(ctx, child, "compression")
+	if err != nil || property.Source.Type == "LOCAL" {
+		t.Fatalf("compression is still local after inherit: %#v, %v", property, err)
+	}
+
+	if err := client.ZFS.InheritProperties(ctx, child, "quota", "atime"); err == nil {
+		t.Fatal("inheriting a non-inheritable property did not fail")
+	}
+}
+
 func TestIntegration_ZFS_GetProperty(t *testing.T) {
 	if os.Getenv("GZFS_INTEGRATION_TESTS") == "" {
 		t.Skip("Integration tests disabled. Set GZFS_INTEGRATION_TESTS=1 to enable.")

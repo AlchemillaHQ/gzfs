@@ -304,6 +304,32 @@ func propertyQueryNames(input []string) ([]string, error) {
 	return names, nil
 }
 
+func (z *zfs) InheritProperties(ctx context.Context, datasetName string, propertyNames ...string) error {
+	if z == nil {
+		return fmt.Errorf("zfs client is nil")
+	}
+	if strings.TrimSpace(datasetName) == "" || strings.HasPrefix(datasetName, "-") || strings.IndexFunc(datasetName, unicode.IsControl) >= 0 {
+		return fmt.Errorf("invalid dataset name")
+	}
+	if len(propertyNames) == 0 {
+		return fmt.Errorf("no_properties_to_inherit")
+	}
+	names, err := propertyQueryNames(propertyNames)
+	if err != nil {
+		return err
+	}
+	if names[0] == "all" {
+		return fmt.Errorf("all cannot be inherited; name each property")
+	}
+
+	for _, name := range names {
+		if _, _, err := z.cmd.RunBytes(ctx, nil, "inherit", name, datasetName); err != nil {
+			return fmt.Errorf("inherit_property_failed: %s: %w", name, err)
+		}
+	}
+	return nil
+}
+
 func (z *zfs) GetProperty(ctx context.Context, datasetName, propName string) (ZFSProperty, error) {
 	properties, err := z.GetProperties(ctx, datasetName, propName)
 	if err != nil {
@@ -751,6 +777,16 @@ func (d *Dataset) SetProperties(ctx context.Context, kvPairs ...string) error {
 	}
 
 	return nil
+}
+
+func (d *Dataset) InheritProperties(ctx context.Context, propertyNames ...string) error {
+	if d == nil {
+		return fmt.Errorf("dataset is nil")
+	}
+	if d.z == nil {
+		return fmt.Errorf("no zfs client attached")
+	}
+	return d.z.InheritProperties(ctx, d.Name, propertyNames...)
 }
 
 func (d *Dataset) Destroy(ctx context.Context, recursive bool, deferDeletion bool) error {
